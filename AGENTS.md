@@ -6,57 +6,62 @@ changes. Read `CONTRIBUTING.md` for the Git workflow and commit convention.
 ## What this project is
 
 Multi-agent code review on top of any OpenAI-compatible or Anthropic provider.
-A **coder** writes code, a **panel** of independent models reviews it in
-parallel, a **consensus** step scores each issue by how many reviewers agreed,
-and a **lead** model arbitrates and produces final code. A FastAPI app exposes
-a run pipeline and a chat with the lead, served as a single-page UI. A
-Textual TUI is also available. All LLM calls go through `llm.py`; no SDK, no
-agent framework.
+The noyau orchestrates two interfaces (a provider = LLM endpoint, a tool =
+MCP server) plus data (team manifests). Domains are declared in `teams/*.yaml`
+without touching application code.
+
+Default flow (team "consensus"):
+**coder** writes code -> **panel** reviews in parallel -> **consensus** scores
+by agreement -> **lead** arbitrates + produces final code -> chat with lead.
+
+A FastAPI app exposes SSE streaming, a single-page UI, and a Textual TUI.
+All LLM calls go through `llm.py`; no SDK, no agent framework.
 
 ## Tech stack
 
-- Python 3.12, `async` throughout.
+- Python 3.12+, `async` throughout.
 - `httpx` directly against providers (no SDK).
-- FastAPI + uvicorn. Pydantic v2. pgvector + embeddings for optional RAG.
-- `aiolimiter` (rate limiting) + `tenacity` (retry/backoff) in `governor.py`.
-- Docker Compose + `make`. Single-page UI: plain HTML/JS, vendored highlight.js.
+- FastAPI + uvicorn. Pydantic v2.
+- `aiolimiter` + `tenacity` in `governor.py` (rate-limit + retry + fallback).
+- `pyyaml` for team manifests.
+- pgvector + sqlite-vec for optional RAG.
+- Docker for the sandbox (opt-in per team).
+- `mcp` SDK (soft dep) for MCP tool integration.
 
 ## Key files
 
-- `src/config.py` - env loading, provider registry (`PROVIDERS`), panel
-  parsing, per-role model/token settings, logging setup.
-- `src/llm.py` - two transports (openai-compatible, anthropic Messages + SSE
-  streaming); single `_client(provider)` factory; per-call usage capture via
-  `usage_scope` / `Usage`; `parse_json` / `complete_json_obj` JSON recovery.
-- `src/governor.py` - rate-limit (aiolimiter) + retry (tenacity) + provider
-  fallback chain per call.
-- `src/agents.py` - `write_code`, `review_code`, `build_consensus`,
-  `lead_verdict`, `lead_chat` / `lead_chat_stream`.
-- `src/pipeline.py` - orchestration: `run_streaming` (async generator, SSE
-  events) and `run` (non-streaming wrapper).
-- `src/sessions.py` - session store with TTL and LRU cap; memory or postgres.
-- `src/quota.py` - low-quota toggle (degraded model/panel when throttled;
-  Lead never downgraded).
-- `src/rag.py` - pgvector (default) or sqlite-vec backend + embeddings.
-- `src/archive.py` - pack file trees into zip/tar/tar.gz/tar.bz2/tar.xz/7z.
-- `src/api.py` - FastAPI endpoints: `/api/run(/stream)`, `/api/chat(/stream)`,
-  `/api/chat/regen-artifacts`, `/api/archive`, `/api/quota`, `/api/health`.
-- `src/models.py` - Pydantic schemas, `Usage`, `CostSummary`, `Artifact`
-  (with `sanitize_path`).
-- `src/static/index.html` - single-page UI.
+- `src/config.py` - env loading, `PROVIDERS` dict, panel parsing, model refs.
+- `src/providers.py` - `resolve("provider/model")` -> (Provider, model), caps.
+- `src/llm.py` - two transports (openai-compatible, Anthropic Messages + SSE);
+  single `_client(provider)` factory; usage capture; response cache integration.
+- `src/governor.py` - `aiolimiter` RPM + `tenacity` retry + provider fallback.
+- `src/agents.py` - coder, reviewer, consensus, lead; all routed through governor.
+- `src/roles.py` - `Role`/`Team` dataclasses + YAML loader from `teams/`.
+- `src/topologies.py` - `consensus`, `pipeline`, `loop` orchestrators; dispatch.
+- `src/pipeline.py` - thin dispatcher: RAG pre-fetch + `topologies.run()`.
+- `src/sandbox.py` - `Sandbox` interface, `DockerSandbox`, `SubprocessSandbox`,
+  `NoSandbox`; opt-in via `role.sandbox=true`.
+- `src/cache.py` - local response cache (memory/sqlite); opt-in `RESPONSE_CACHE=1`.
+- `src/context.py` - `AgentContext` builder (stable prefix order for cache hits).
+- `src/skills.py` - load `skills/*/SKILL.md` on demand.
+- `src/mcp_client.py` - `MCPClientManager` (stdio + Streamable HTTP).
+- `src/rag.py` - pgvector (default) or sqlite-vec RAG backend.
+- `src/archive.py` - zip/tar/7z packing with zip-slip protection.
+- `src/api.py` - FastAPI endpoints + SSE + static UI.
+- `src/models.py` - Pydantic schemas: `Usage`, `PipelineResult`, `SandboxResult`.
+- `src/sessions.py` - TTL + LRU session store (memory or postgres).
+- `src/quota.py` - low-quota mode (Lead never downgraded).
 
 ## Running and testing
 
-The app runs inside Docker talking to a provider. For offline tests (no
-provider needed):
+The app runs inside Docker. For offline tests (no provider key needed):
 
 ```
-make check    # lint + typecheck + test (ZEN_API_KEY=dummy is set by the Makefile)
+make check    # lint + typecheck + test (ZEN_API_KEY=dummy set by Makefile)
 make test     # tests only
 ```
 
 For a real run (Zen key in .env):
-
 ```
 make up
 make run SPEC="write a Python class that does X"
@@ -64,46 +69,61 @@ make run SPEC="write a Python class that does X"
 
 ## Conventions and invariants
 
-- No LLM SDK, no agent framework: talk to providers with `httpx` in `llm.py`.
-- Provider resolution goes through `config.get_provider(name)`. Never hardcode
-  base URLs or auth headers outside `config.py` and `llm.py`.
-- Prompts must request strict JSON; parse with `parse_json` / `complete_json_obj`
-  which repair fenced/garbled output and retry.
-- The panel is resilient: a failing reviewer returns `ok=False` and is skipped.
-  The lead is also resilient: if its JSON cannot be parsed, `lead_verdict`
-  returns a degraded verdict. A run always completes.
-- The `consensus_score` is the core signal and must never trust the model
-  blindly: `flagged_by` is validated against the real panel, deduped, and the
-  score is derived in code (clamped to 1.0). Preserve this invariant.
-- Use the `logging` module (configured in `config.py`). Never log secrets.
-- Streaming endpoints keep a non-streaming fallback.
-- Multi-file output: sanitize artifact paths (zip-slip) on ingestion and before
-  archiving.
-- SOLID/DRY/KISS/YAGNI: one responsibility per module, single `_client()`
-  factory, no premature abstraction.
+- **No SDK, no agent framework**: all provider calls through `llm.py`/`governor.py`.
+- **Provider resolution**: always through `providers.resolve()` or `config.get_provider()`.
+  Never hardcode base URLs or auth headers outside `config.py`/`llm.py`.
+- **JSON from LLMs**: request strict JSON in prompts; parse with `parse_json` /
+  `complete_json_obj` which repair and retry. Never `json.loads` raw LLM output directly.
+- **Panel resilience**: a failing reviewer returns `ok=False` and is skipped.
+  A run always completes; the lead returns a degraded verdict on JSON parse failure.
+- **Consensus score**: validated against the real panel, deduped, derived in code,
+  clamped to 1.0. Never trust the model's `flagged_by` blindly. Preserve this invariant.
+- **Governor**: every agent call goes through `governor.call()` (rate-limit + retry +
+  fallback). Never bypass it with a direct `llm.complete()` in agents.
+- **Context builder prefix order**: system -> skills -> tools -> RAG -> spec (volatile
+  last). Maintain this order in `context.py` for cache efficiency.
+- **Adding a domain**: create `teams/<name>.yaml` + optional `skills/<name>/SKILL.md`.
+  Zero application code changes required.
+- **Logging**: use the `logging` module. Never log secrets or API keys.
+- **Multi-file artifacts**: sanitize paths (zip-slip) on ingestion and before archiving.
+
+## Sandbox safety invariants (NEVER relax)
+
+When `sandbox: true` is set in a team manifest, LLM-generated code is executed.
+This is a real attack surface. The DockerSandbox enforces:
+
+- `--network none` - no outbound network.
+- `--read-only` - root FS read-only.
+- `--memory` cap - no memory exhaustion.
+- `--cpu-quota` cap - no CPU starvation.
+- Timeout - stuck containers are killed.
+- **No secrets mounted into the container.**
+
+SubprocessSandbox has NO real isolation. It must never be used with untrusted
+LLM-generated code in a shared or network-accessible environment.
 
 ## Provider specifics
 
-- Model IDs use the format `provider/model-id` in env vars (e.g.
-  `zen/deepseek-r1-0528`, `anthropic/claude-opus-latest`).
-- Zen uses `/chat/completions`. The `/responses` endpoint also works for some
-  models; use `call_openai_compatible` for both.
-- Reasoning models spend tokens before emitting JSON: keep the high
-  `max_tokens` already set for reviewers and the lead.
-- 429/503 are retried by the governor (tenacity + aiolimiter). When retries
-  are exhausted and `AUTO_LOW_QUOTA=1`, low-quota mode is enabled automatically.
+- Model refs: `provider/model-id` format (e.g. `zen/deepseek-r1-0528`).
+- Zen: OpenAI-compatible `/chat/completions`; real cost in `usage.cost_details.upstream_inference_cost`.
+- Anthropic: native Messages API with SSE streaming; cost not reported (tokens only).
+- OpenRouter via `openai` provider: set `OPENAI_BASE_URL=https://openrouter.ai/api/v1`.
+- Reasoning models spend tokens before emitting JSON: keep high `max_tokens`.
+- 429/503 retried by governor; `AUTO_LOW_QUOTA=1` auto-enables low-quota on exhaustion.
 
 ## Security
 
-- Loopback-only, no application auth, CORS restricted to `ALLOWED_ORIGINS`.
+- Loopback-only bind, no application auth, CORS restricted to `ALLOWED_ORIGINS`.
 - Input sizes capped before any billable call.
-- Artifact paths sanitized against zip-slip in `models.sanitize_path` and
-  again in `archive._validated`.
-- Never commit secrets. Only `.env.example` (placeholders) is tracked.
+- Zip-slip protection in `models.sanitize_path` and `archive._validated`.
+- Never commit secrets; only `.env.example` is tracked.
 
 ## Do / don't
 
-- Do branch from `main` for all changes; follow the commit convention.
+- Do branch from `main`; follow Conventional Commits.
 - Do prefer editing existing files over creating new ones.
-- Don't add LLM SDKs or agent frameworks (breaks the framework-free invariant).
+- Do run `make check` before committing.
+- Don't add LLM SDKs or agent frameworks.
+- Don't bypass the governor in agents.
 - Don't commit secrets or `.env` files other than `.env.example`.
+- Don't relax DockerSandbox security invariants.

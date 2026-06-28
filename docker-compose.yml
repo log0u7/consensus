@@ -1,0 +1,49 @@
+# Base stack: pgvector (RAG store, optional) + app (consensus pipeline + web UI).
+# Use the Makefile, which layers env and overlays:
+#   make up          # base stack from .env
+#   make up DEV=1    # hot reload
+services:
+  pgvector:
+    image: pgvector/pgvector:pg17
+    container_name: consensus-pgvector
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PG_USER:-raguser}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?PG_PASSWORD required}
+      POSTGRES_DB: ${PG_DB:-ragdb}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - pgvector_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-raguser} -d ${PG_DB:-ragdb}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: consensus-app
+    restart: unless-stopped
+    depends_on:
+      pgvector:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8800:8000"
+    # Inject all env vars so any new .env key reaches the container without
+    # editing this file.  PG_DSN is computed from parts below.
+    env_file:
+      - .env.active
+    environment:
+      PG_DSN: "postgresql://${PG_USER:-raguser}:${PG_PASSWORD}@pgvector:5432/${PG_DB:-ragdb}"
+    volumes:
+      - ./docs-projet:/app/docs-projet:ro
+
+volumes:
+  pgvector_data:

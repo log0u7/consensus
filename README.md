@@ -1,157 +1,213 @@
 # Consensus
 
-Multi-agent code review running on any OpenAI-compatible provider. Free by
-default on [Zen](https://opencode.ai) (no credit card required).
+Multi-agent orchestration running on any OpenAI-compatible or Anthropic provider.
+Free by default on [Zen](https://opencode.ai) (no credit card required).
 
-A **coder** model writes code from a spec. A **panel** of independent models
-reviews it in parallel. A **consensus** step scores each issue by how many
-reviewers agreed. A **lead** model arbitrates and produces the final code.
-You then chat with the lead about the result.
+Domains are declared as **team manifests** (`teams/*.yaml`). The default team
+performs multi-agent **code review**: a coder writes, a panel of independent
+models reviews in parallel, a consensus step scores each issue by agreement,
+and a lead arbitrates and produces the final code.
 
-The idea: a finding confirmed by several independent reviewers is high
-confidence; a finding raised by only one reviewer is a candidate that may be
-a false positive. Consensus scoring makes that explicit instead of trusting
-one model blindly.
+Other built-in teams: **SRE/DevOps** (planner -> executor -> verifier) and
+**pentest/CTF** (recon -> exploit -> report loop). Adding a domain requires only
+a new YAML file - no application code changes.
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-    spec([spec]) --> coder["CODER\nzen/deepseek-v3-0324"]
-    coder -->|code| panel
+    spec([spec + team.yaml]) --> pipeline
 
-    subgraph panel["PANEL - parallel, independent reviews"]
-        direction LR
-        r1["deepseek-coder\nzen/deepseek-v3-0324"]
-        r2["qwen3-coder\nzen/qwen3-coder"]
-        r3["mimo-vl\nzen/mimo-vl-7b-rl"]
+    subgraph pipeline["pipeline.py - dispatcher"]
+        rag[RAG optional] --> topology
+        topology{topology}
     end
 
-    r1 -.->|may fail, skipped| consensus
-    r2 -->|review| consensus
-    r3 -->|review| consensus
+    topology -->|consensus| cons_flow
+    topology -->|pipeline| seq_flow
+    topology -->|loop| loop_flow
 
-    consensus["CONSENSUS\nzen/deepseek-r1-0528\nscores by agreement"]
-    consensus -->|consensus report| lead["LEAD\nzen/deepseek-r1-0528\nverdict + final code + chat"]
-    lead --> ui([web UI / TUI / CLI])
+    subgraph cons_flow["consensus team"]
+        coder["CODER"] --> sandbox["sandbox\nopt-in"]
+        sandbox --> panel["PANEL\nparallel"]
+        panel --> consensus["CONSENSUS\nscores by agreement"]
+        consensus --> lead["LEAD\nverdict + chat"]
+    end
+
+    subgraph seq_flow["SRE team"]
+        planner --> executor --> verifier
+    end
+
+    subgraph loop_flow["pentest team"]
+        recon --> exploit --> reporter
+    end
 ```
 
-The panel is resilient: if a reviewer call fails it is skipped and consensus
-uses the reviewers that answered. A single model never blocks a run.
+All LLM calls: httpx -> provider, routed through `governor.py`
+(rate-limit + retry + fallback). No SDK, no agent framework.
 
 ## Providers
 
-Any OpenAI-compatible endpoint works as a provider. Four are preconfigured:
+| Name        | Transport          | Default base URL                          |
+|-------------|--------------------|-------------------------------------------|
+| `zen`       | OpenAI-compatible  | `https://opencode.ai/zen/v1` (free)       |
+| `openai`    | OpenAI-compatible  | configurable `OPENAI_BASE_URL`            |
+| `anthropic` | Anthropic Messages | `https://api.anthropic.com/v1`            |
+| `local`     | OpenAI-compatible  | `LOCAL_BASE_URL` (Ollama, vLLM, ...)      |
 
-| Name        | Transport             | Default base URL                          |
-|-------------|-----------------------|-------------------------------------------|
-| `zen`       | OpenAI-compatible     | `https://opencode.ai/zen/v1` (free)       |
-| `openai`    | OpenAI-compatible     | `https://api.openai.com/v1` (configurable)|
-| `anthropic` | Anthropic Messages    | `https://api.anthropic.com/v1`            |
-| `local`     | OpenAI-compatible     | `$LOCAL_BASE_URL` (Ollama, vLLM, ...)     |
-
-Models are referenced as `provider/model-id` in environment variables, e.g.
-`zen/deepseek-r1-0528` or `anthropic/claude-opus-latest`.
+Models use the `provider/model-id` format: `zen/deepseek-r1-0528`,
+`anthropic/claude-opus-latest`, `local/qwen2.5-coder`.
 
 ## Quickstart (Zen, free)
 
 1. Get a free Zen key at https://opencode.ai.
-
 2. Configure:
    ```
    cp .env.example .env
    # edit .env: set ZEN_API_KEY
    ```
-
 3. Start:
    ```
    make up
    ```
    Open http://localhost:8800
 
-## Prerequisites
+## Teams and topologies
 
-- Docker and Docker Compose v2.
-- `make`.
-- A provider key (Zen is free; see `.env.example` for other providers).
+Teams are YAML files in `teams/`. Three topologies are available:
+
+| Topology    | Flow                                  | Example team     |
+|-------------|---------------------------------------|------------------|
+| `consensus` | coder -> panel -> consensus -> lead   | `consensus.yaml` |
+| `pipeline`  | role1 -> role2 -> role3 (sequential)  | `sre.yaml`       |
+| `loop`      | roles cycle until `[DONE]`            | `pentest.yaml`   |
+
+To use a non-default team via the CLI:
+```
+# (currently via pipeline.run directly; UI team selection coming in a future version)
+```
+
+### Adding a domain
+
+1. Create `teams/<name>.yaml` with `topology`, `sandbox`, and `roles`.
+2. Add `skills/<name>/SKILL.md` if domain expertise is needed.
+3. Run `make test`.
+
+No application code changes required.
+
+## Sandbox (opt-in)
+
+When `sandbox: true` is set on a role, the coder's generated code is executed
+before the panel reviews it. Reviewers see actual execution output.
+
+**Engines** (set `SANDBOX_ENGINE`):
+- `docker` (default): throwaway container, `--network none`, read-only FS,
+  memory + CPU limits. Requires Docker.
+- `subprocess`: local subprocess with timeout. **No real isolation** - local
+  dev only.
+- `none`: skip execution.
+
+## Skills
+
+Skills are Markdown files loaded into the prompt when a role references them.
+Bundled skills: `coding`, `review`, `sre`, `pentest`.
+
+Add a skill: create `skills/<name>/SKILL.md`. Reference in team YAML:
+```yaml
+roles:
+  planner:
+    skills: [sre, coding]
+```
+
+## MCP tools (optional)
+
+Tools are provided by MCP servers (Serena for LSP, custom infra tools, etc.).
+The `mcp` SDK is a soft dependency - only needed when tools are listed in a team.
+
+```
+pip install mcp
+```
+
+**Serena (LSP)** - reduces token usage by providing symbolic code navigation
+instead of dumping whole files. Launch externally:
+```
+uvx --from git+https://github.com/oraios/serena \
+  serena start-mcp-server --context ide-assistant --project .
+```
+Then list it under `tools:` in your team manifest.
+
+## Cache
+
+Set `RESPONSE_CACHE=1` to cache identical LLM calls locally. Useful during
+development and for repeated runs on the same code.
+
+```
+RESPONSE_CACHE=1
+CACHE_BACKEND=sqlite      # or "memory" (default, lost on restart)
+CACHE_DB_PATH=cache.db
+```
 
 ## Make targets
 
-`make` (or `make help`) lists everything.
+| Target                  | Action                                            |
+|-------------------------|---------------------------------------------------|
+| `make up` / `start`     | Start the stack, detached (builds if needed)      |
+| `make down` / `stop`    | Stop and remove the stack                         |
+| `make update` / `reload`| Rebuild and recreate the app after code changes   |
+| `make logs`             | Follow the app logs                               |
+| `make run SPEC="..."`   | Run the pipeline on the CLI                       |
+| `make index`            | Index `docs-projet/` into the RAG store           |
+| `make check`            | Lint + typecheck + test (CI entrypoint)           |
 
-| Target               | Action                                             |
-|----------------------|----------------------------------------------------|
-| `make up` / `start`  | Start the stack, detached (builds if needed)       |
-| `make down` / `stop` | Stop and remove the stack                          |
-| `make update`/`reload`| Rebuild and recreate the app after code changes   |
-| `make restart`       | Restart the app without rebuilding                 |
-| `make logs`          | Follow the app logs                                |
-| `make run SPEC="..."` | Run the pipeline on the CLI                       |
-| `make index`         | Index `docs-projet/` into the RAG store            |
-| `make nuke`          | Stop and delete volumes (wipes pgvector data)      |
-| `make check`         | Lint + typecheck + test (CI entrypoint)            |
-
-`ENV=<name>` merges `.env.<name>` on top of `.env` and layers
-`docker-compose.<name>.yml` if present. `DEV=1` adds hot reload.
-
-## Multi-file output and archives
-
-The coder and lead can emit a whole file tree. The LLM never produces a
-binary: it returns `files` as JSON (path + content), and the server packs the
-requested archive format. The chat can also regenerate the tree on demand.
-
-Supported archive formats: `zip`, `tar`, `tar.gz`, `tar.bz2`, `tar.xz`, `7z`.
-
-## CLI usage
-
-```
-make run SPEC="write a Go HTTP server with graceful shutdown"
-```
+`DEV=1` adds hot reload. `ENV=<name>` merges `.env.<name>` and layers
+`docker-compose.<name>.yml`.
 
 ## RAG (optional, off by default)
 
-RAG is disabled unless `use_rag=True` is set.
-
 1. Put documents under `docs-projet/` (.md, .txt, .py, .rst).
 2. `make index`
+3. Set `use_rag=true` per request (API or CLI).
 
-Two backends: `pgvector` (default, requires Postgres, bundled in compose) and
-`sqlite` (single file, set `RAG_BACKEND=sqlite` in `.env`).
+Two backends: `pgvector` (default, bundled in compose) and `sqlite`
+(`RAG_BACKEND=sqlite`, single file, no server).
 
 ## Rate limits and low-quota mode
 
-Providers enforce quotas. The client retries 429/503 with exponential backoff
-and jitter (honoring `Retry-After`). When retries are exhausted,
-`AUTO_LOW_QUOTA=1` switches on low-quota mode automatically:
+The governor retries 429/503 with exponential backoff (honouring `Retry-After`).
+When retries are exhausted, `AUTO_LOW_QUOTA=1` switches on low-quota mode:
 
 - Coder and consensus drop to `LOW_QUOTA_MODEL`.
 - The panel shrinks to `LOW_QUOTA_PANEL_SIZE` reviewers.
 - **The lead is never downgraded.**
 
-Toggle it manually from the header pill or via `POST /api/quota`.
+Per-role fallback: `CODER_FALLBACK=local` falls back to a local LLM when Zen
+is down.
 
-## Configuration
+Toggle low-quota manually from the header pill or `POST /api/quota`.
+
+## Configuration reference
 
 All in `.env`. See `.env.example` for the full reference with comments.
 
-### Key variables
+| Variable            | Default                    | Purpose                             |
+|---------------------|----------------------------|-------------------------------------|
+| `ZEN_API_KEY`       | (required for Zen)         | Zen provider key                    |
+| `CODER_MODEL`       | `zen/deepseek-v3-0324`     | Coder role model                    |
+| `LEAD_MODEL`        | `zen/deepseek-r1-0528`     | Lead role model                     |
+| `REVIEW_PANEL`      | (Zen default panel)        | `name:provider/model[:max_tokens]`  |
+| `SANDBOX_ENGINE`    | `docker`                   | `docker`, `subprocess`, or `none`   |
+| `RESPONSE_CACHE`    | `0`                        | Set `1` to enable local cache       |
+| `RAG_BACKEND`       | `pgvector`                 | `pgvector` or `sqlite`              |
+| `AUTO_LOW_QUOTA`    | `1`                        | Auto low-quota on 429 exhaustion    |
+| `CODER_FALLBACK`    | (empty)                    | Fallback provider(s) for coder      |
 
-| Variable         | Default                   | Purpose                              |
-|------------------|---------------------------|--------------------------------------|
-| `ZEN_API_KEY`    | (required for Zen)        | Zen provider key                     |
-| `CODER_MODEL`    | `zen/deepseek-v3-0324`    | Coder role model                     |
-| `CONSENSUS_MODEL`| `zen/deepseek-r1-0528`    | Consensus role model                 |
-| `LEAD_MODEL`     | `zen/deepseek-r1-0528`    | Lead role model                      |
-| `REVIEW_PANEL`   | (Zen default panel)       | `name:provider/model[:max_tokens]`   |
-| `RAG_BACKEND`    | `pgvector`                | `pgvector` or `sqlite`               |
-| `AUTO_LOW_QUOTA` | `1`                       | Auto-enable low-quota on 429         |
+## Security
 
-## Security posture
-
-- Binds to loopback only (see `docker-compose.yml`); no application auth.
+- Binds to loopback only; no application auth.
 - CORS restricted to `ALLOWED_ORIGINS`.
-- Input sizes capped before any billable call (`MAX_SPEC_CHARS`, `MAX_MESSAGE_CHARS`).
-- Artifact paths sanitized against zip-slip on ingestion and before archiving.
+- Input sizes capped before any billable call.
+- Artifact paths sanitized against zip-slip (ingestion + archive).
+- Sandbox: Docker `--network none`, read-only FS, resource caps, no secrets mounted.
 - No secrets baked into the image; `.gitignore` excludes all `.env*` files
   except `.env.example`.
 
@@ -160,29 +216,37 @@ All in `.env`. See `.env.example` for the full reference with comments.
 ```
 consensus/
   README.md
-  Makefile                    command interface (make help)
-  docker-compose.yml          base stack (pgvector + app)
-  docker-compose.dev.yml      overlay: hot reload (DEV=1)
-  Dockerfile                  context-neutral image
-  requirements.txt
-  .env.example                config template (copy to .env)
-  docs-projet/                drop RAG documents here
+  Makefile
+  docker-compose.yml / docker-compose.dev.yml
+  Dockerfile
+  requirements.txt / requirements-dev.txt
+  .env.example
+  teams/          team manifests (YAML)
+  skills/         skill files (SKILL.md per domain)
+  docs-projet/    RAG documents (drop files here)
   src/
-    config.py                 env loading, provider registry, logging
-    llm.py                    httpx transports (openai-compatible + anthropic)
-    governor.py               rate-limit (aiolimiter) + retry (tenacity) + fallback
-    models.py                 pydantic schemas (Usage, CostSummary, ...)
-    agents.py                 coder, reviewer, consensus, lead
-    pipeline.py               orchestration: run() and run_streaming() (SSE)
-    sessions.py               session store (TTL + LRU cap; memory or postgres)
-    archive.py                pack a file tree into zip/tar(.gz/.bz2/.xz)/7z
-    quota.py                  low-quota mode toggle
-    rag.py                    optional pgvector + embeddings (or sqlite-vec)
-    api.py                    FastAPI endpoints + SSE streaming
-    static/index.html         single-page chat UI
-    static/vendor/            vendored highlight.js + dark theme (offline, BSD-3)
-  tui/                        optional Textual terminal UI
-  tests/                      offline unit tests (pytest)
+    config.py     env + provider registry
+    providers.py  resolve() + capability metadata
+    llm.py        httpx transports (openai-compatible + Anthropic + SSE)
+    governor.py   rate-limit + retry + fallback
+    agents.py     coder, reviewer, consensus, lead
+    pipeline.py   dispatcher (RAG + topologies.run)
+    roles.py      Role/Team + YAML loader
+    topologies.py consensus / pipeline / loop
+    sandbox.py    Docker / subprocess / no-op sandbox
+    cache.py      local response cache
+    context.py    AgentContext builder (stable prefix)
+    skills.py     SKILL.md loader
+    mcp_client.py MCP server manager
+    rag.py        pgvector + sqlite-vec
+    archive.py    zip/tar/7z packing
+    models.py     Pydantic schemas
+    sessions.py   session store
+    quota.py      low-quota toggle
+    api.py        FastAPI + SSE
+    static/       SPA + vendored highlight.js (BSD-3)
+  tui/            Textual terminal UI
+  tests/          offline unit tests (120+ tests)
 ```
 
 ## License

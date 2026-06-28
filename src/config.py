@@ -231,6 +231,17 @@ CONSENSUS_MAX_TOKENS = int(os.environ.get("CONSENSUS_MAX_TOKENS", "8000"))
 LEAD_MAX_TOKENS     = int(os.environ.get("LEAD_MAX_TOKENS",     "16000"))
 CHAT_MAX_TOKENS     = int(os.environ.get("CHAT_MAX_TOKENS",     "4000"))
 
+# Per-role provider fallback chain: comma-separated provider names tried in
+# order when the primary provider exhausts its retries.
+# Example: CODER_FALLBACK=local  (fall back to a local LLM when Zen is down)
+def _parse_fallback(raw: str) -> list[str]:
+    return [p.strip() for p in raw.split(",") if p.strip()] if raw.strip() else []
+
+CODER_FALLBACK     = _parse_fallback(os.environ.get("CODER_FALLBACK",     ""))
+REVIEWER_FALLBACK  = _parse_fallback(os.environ.get("REVIEWER_FALLBACK",  ""))
+CONSENSUS_FALLBACK = _parse_fallback(os.environ.get("CONSENSUS_FALLBACK", ""))
+LEAD_FALLBACK      = _parse_fallback(os.environ.get("LEAD_FALLBACK",      ""))
+
 # Low-quota degraded profile (Lead is never downgraded)
 LOW_QUOTA_MODEL      = os.environ.get("LOW_QUOTA_MODEL",      "zen/deepseek-v3-0324")
 LOW_QUOTA_PANEL_SIZE = int(os.environ.get("LOW_QUOTA_PANEL_SIZE", "2"))

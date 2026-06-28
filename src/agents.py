@@ -6,10 +6,11 @@ recovers it with repair and retry.
 """
 
 import logging
+from collections.abc import Awaitable
 
 from pydantic import ValidationError
 
-from . import config, llm, quota
+from . import config, governor, llm, quota
 from .models import (
     Artifact,
     ConsensusIssue,
@@ -61,12 +62,20 @@ async def write_code(spec: str, context: str = "") -> dict:
     provider, model = quota.coder_model()
     tok = llm.set_step("coder")
     try:
-        data = await llm.complete_json_obj(
-            lambda attempt: llm.complete(
-                provider, model,
+        def _make(prov: str, attempt: int) -> Awaitable[str]:
+            return llm.complete(
+                prov, model,
                 user + (llm._JSON_RETRY_HINT if attempt else ""),
                 _CODER_SYS,
                 max_tokens=config.CODER_MAX_TOKENS,
+            )
+
+        data = await llm.complete_json_obj(
+            lambda attempt: governor.call(
+                provider,
+                lambda: _make(provider, attempt),
+                fallback=config.CODER_FALLBACK,
+                fallback_factory=lambda p: (lambda: _make(p, attempt)),
             )
         )
     finally:
@@ -109,12 +118,20 @@ async def review_code(panel_member: dict, code: str) -> Review:
     user = f"Code to review:\n\n{code}"
     tok = llm.set_step(f"reviewer:{name}")
     try:
-        data = await llm.complete_json_obj(
-            lambda attempt: llm.complete(
-                provider, model,
+        def _make(prov: str, attempt: int) -> Awaitable[str]:
+            return llm.complete(
+                prov, model,
                 user + (llm._JSON_RETRY_HINT if attempt else ""),
                 _REVIEW_SYS,
                 max_tokens=max_tokens,
+            )
+
+        data = await llm.complete_json_obj(
+            lambda attempt: governor.call(
+                provider,
+                lambda: _make(provider, attempt),
+                fallback=config.REVIEWER_FALLBACK,
+                fallback_factory=lambda p: (lambda: _make(p, attempt)),
             )
         )
         issues = []
@@ -169,12 +186,20 @@ async def build_consensus(reviews: list[Review]) -> ConsensusReport:
     provider, model = quota.consensus_model()
     tok = llm.set_step("consensus")
     try:
-        data = await llm.complete_json_obj(
-            lambda attempt: llm.complete(
-                provider, model,
+        def _make(prov: str, attempt: int) -> Awaitable[str]:
+            return llm.complete(
+                prov, model,
                 f"Reviews:\n\n{blob}" + (llm._JSON_RETRY_HINT if attempt else ""),
                 _CONSENSUS_SYS,
                 max_tokens=config.CONSENSUS_MAX_TOKENS,
+            )
+
+        data = await llm.complete_json_obj(
+            lambda attempt: governor.call(
+                provider,
+                lambda: _make(provider, attempt),
+                fallback=config.CONSENSUS_FALLBACK,
+                fallback_factory=lambda p: (lambda: _make(p, attempt)),
             )
         )
     finally:
@@ -266,12 +291,20 @@ async def lead_verdict(spec: str, code: str, consensus_json: str) -> dict:
         return min(config.LEAD_MAX_TOKENS * (attempt + 1), 64000)
 
     try:
-        data = await llm.complete_json_obj(
-            lambda attempt: llm.complete(
-                provider, model,
+        def _make(prov: str, attempt: int) -> Awaitable[str]:
+            return llm.complete(
+                prov, model,
                 _LEAD_VERDICT_INSTR + (llm._JSON_RETRY_HINT if attempt else ""),
                 system,
                 max_tokens=_budget(attempt),
+            )
+
+        data = await llm.complete_json_obj(
+            lambda attempt: governor.call(
+                provider,
+                lambda: _make(provider, attempt),
+                fallback=config.LEAD_FALLBACK,
+                fallback_factory=lambda p: (lambda: _make(p, attempt)),
             )
         )
     except ValueError as exc:

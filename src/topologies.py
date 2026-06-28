@@ -21,7 +21,8 @@ import time
 from collections.abc import AsyncIterator, Callable
 
 from . import agents, config, llm, quota
-from .models import ConsensusReport, CostSummary, PipelineResult, Usage
+from . import sandbox as sandbox_mod
+from .models import ConsensusReport, CostSummary, PipelineResult, SandboxResult, Usage
 from .roles import Role, Team
 
 log = logging.getLogger(__name__)
@@ -100,11 +101,42 @@ async def run_consensus(
             "usage": _summarize(usages).model_dump(),
         }
 
+        # 1b. Optional sandbox execution (opt-in via coder_role.sandbox)
+        exec_result: sandbox_mod.SandboxResult | None = None
+        sandbox_context = ""
+        if coder_role and coder_role.sandbox and coded["files"]:
+            rlog("info", "sandbox: executing generated code")
+            import sys as _sys
+            _pyexe = _sys.executable
+            exec_result = await sandbox_mod.run(
+                coded["files"],
+                cmd=f"{_pyexe} {coded['files'][0].path}" if coded["files"] else f"{_pyexe} -c 'pass'",
+            )
+            sandbox_context = exec_result.as_context()
+            rlog(
+                "info", "sandbox done: exit=%d timed_out=%s",
+                exec_result.exit_code, exec_result.timed_out,
+            )
+            yield {
+                "type": "execution",
+                "execution": {
+                    "stdout": exec_result.stdout,
+                    "stderr": exec_result.stderr,
+                    "exit_code": exec_result.exit_code,
+                    "timed_out": exec_result.timed_out,
+                    "engine": exec_result.engine,
+                },
+                "usage": _summarize(usages).model_dump(),
+            }
+
+        # Inject execution output into code context for panel.
+        panel_code = code if not sandbox_context else f"{code}\n\n{sandbox_context}"
+
         # 2. Panel (parallel, resilient)
         members = _panel_members(reviewer_role) if reviewer_role else quota.panel()
         t_panel = time.perf_counter()
         reviews: list = []
-        tasks = [asyncio.create_task(agents.review_code(m, code)) for m in members]
+        tasks = [asyncio.create_task(agents.review_code(m, panel_code)) for m in members]
         for fut in asyncio.as_completed(tasks):
             review = await fut
             reviews.append(review)
@@ -139,6 +171,17 @@ async def run_consensus(
             str(summary.cost) if summary.cost_known else "unknown",
         )
 
+        exec_model: SandboxResult | None = None
+        if exec_result is not None:
+            exec_model = SandboxResult(
+                stdout=exec_result.stdout,
+                stderr=exec_result.stderr,
+                exit_code=exec_result.exit_code,
+                timed_out=exec_result.timed_out,
+                skipped=exec_result.skipped,
+                engine=exec_result.engine,
+            )
+
         yield {
             "type": "result",
             "result": PipelineResult(
@@ -152,6 +195,7 @@ async def run_consensus(
                 rationale=verdict["rationale"],
                 files=files,
                 rag_sources=rag_sources,
+                execution=exec_model,
                 usages=list(usages),
                 cost_summary=summary,
             ).model_dump(),

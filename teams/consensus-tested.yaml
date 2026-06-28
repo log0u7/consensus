@@ -1,0 +1,37 @@
+# Code review team with sandbox execution enabled.
+# Like consensus.yaml, but the coder runs and tests the generated code
+# before sending it to the panel. Reviewers see actual execution output.
+topology: consensus
+sandbox: true
+
+roles:
+  coder:
+    model: zen/deepseek-v3-0324
+    fallback: []
+    max_tokens: 8000
+    skills: []
+    tools: []
+    rag_ns: ""
+    sandbox: true   # execute code after generation; inject output into panel context
+
+  reviewer:
+    members:
+      - name: deepseek-coder
+        model: zen/deepseek-v3-0324
+      - name: qwen3-coder
+        model: zen/qwen3-coder
+      - name: mimo-vl
+        model: zen/mimo-vl-7b-rl
+    fallback: []
+    max_tokens: 8000
+    sandbox: false
+
+  consensus:
+    model: zen/deepseek-r1-0528
+    fallback: []
+    max_tokens: 8000
+
+  lead:
+    model: zen/deepseek-r1-0528
+    fallback: []
+    max_tokens: 16000

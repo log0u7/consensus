@@ -1,0 +1,11 @@
+# Dev overlay: mount the source over the image and hot-reload.
+# Enabled by the Makefile with DEV=1, e.g.:
+#   make up DEV=1
+#   make up ENV=perso DEV=1
+# Python edits reload automatically and static/index.html updates on a browser
+# refresh, so no rebuild is needed while iterating.
+services:
+  app:
+    volumes:
+      - ./src:/app/src
+    command: ["uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

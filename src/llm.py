@@ -237,6 +237,11 @@ async def call_openai_compatible_history(
     max_tokens: int = 4096,
 ) -> str:
     """Multi-turn completion via POST /chat/completions (full message history)."""
+    from . import cache as cache_mod
+    cached = cache_mod.get(messages, model)
+    if cached is not None:
+        return cached
+
     provider = config.get_provider(provider_name)
     payload: dict[str, Any] = {
         "model": model,
@@ -249,7 +254,9 @@ async def call_openai_compatible_history(
         data = r.json()
     inp, out, cost = _read_usage_openai(data)
     _record(provider_name, model, inp, out, cost, int((time.perf_counter() - t0) * 1000))
-    return data["choices"][0]["message"]["content"]
+    result = data["choices"][0]["message"]["content"]
+    cache_mod.put(messages, model, result)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +290,12 @@ async def _call_anthropic_messages(
     system: str | None,
     max_tokens: int,
 ) -> str:
+    from . import cache as cache_mod
+    cache_key_msgs = [{"role": "system", "content": system or ""}, *messages]
+    cached = cache_mod.get(cache_key_msgs, model)
+    if cached is not None:
+        return cached
+
     provider = config.get_provider("anthropic")
     payload: dict[str, Any] = {
         "model": model,
@@ -297,9 +310,11 @@ async def _call_anthropic_messages(
         data = r.json()
     inp, out = _read_usage_anthropic(data)
     _record("anthropic", model, inp, out, None, int((time.perf_counter() - t0) * 1000))
-    return "".join(
+    result = "".join(
         b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"
     )
+    cache_mod.put(cache_key_msgs, model, result)
+    return result
 
 
 async def call_anthropic_history_stream(

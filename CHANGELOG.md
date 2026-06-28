@@ -5,7 +5,53 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] - 0.2.0
+## [Unreleased]
+
+---
+
+## [0.2.0] - 2026-06-29
+
+### Added
+
+- **Tests - quota** (`tests/test_quota.py`, 16 tests): low-quota toggle,
+  coder/consensus downgrade, Lead-never-downgraded invariant, `profile()`
+  helper.
+- **Tests - agents** (`tests/test_agents.py`, 14 tests): `write_code`
+  single/multi-file, zip-slip path sanitisation, `review_code` resilience
+  (`ok=False` on failure), severity normalisation, `build_consensus`
+  `flagged_by` validation/dedup/clamp, `lead_verdict` degraded fallback.
+- **Tests - pipeline** (`tests/test_pipeline.py`, 15 tests): `run_streaming`
+  event sequence and order, `run()` returns `PipelineResult`, `CostSummary`
+  aggregation, RAG not called by default, `lead_system_for`.
+- **Tests - topologies** (6 new): `run_pipeline` sequential steps and context
+  accumulation; `run_loop` `max_iterations`, early-stop on `[DONE]`, output
+  dict shape.
+- **Tests - edge cases** (11 new): single-reviewer score=1.0, equal-score
+  severity sort, panel only includes `ok` reviewers, `min_score=0` keeps
+  all rows, score field in hits, Artifact roundtrip, JSON-serializability of
+  sessions.
+- **Documentation** (`docs/`): four new reference documents:
+  - `docs/teams.md`: team YAML anatomy, three topologies, adding a domain,
+    skills, sandbox.
+  - `docs/providers.md`: model reference format, built-in providers, transports,
+    adding a provider, governor retry/fallback, per-reviewer `max_tokens`.
+  - `docs/rag.md`: why off by default, pgvector vs sqlite-vec, quickstart, how
+    it works, config reference, CLI tools.
+  - `docs/ui.md`: web UI, TUI key bindings/screens, full API endpoint table,
+    SSE event types, session lifecycle, run request schema.
+- **README**: "Fork in 5 minutes" quickstart section; Documentation table
+  linking to `docs/`.
+
+### Tests
+
+179 tests passing (up from 120 at end of v0.2.0 development). New test files:
+`test_quota.py`, `test_agents.py`, `test_pipeline.py`. Extended:
+`test_teams_and_topologies.py`, `test_consensus_scoring.py`,
+`test_rag_threshold.py`, `test_session_serialization.py`.
+
+---
+
+## [0.2.0-dev] - 2026-06-28
 
 ### Added
 
@@ -59,6 +105,8 @@ sqlite), skills, context builder, MCP client, SRE/pentest team loading.
 
 ---
 
+---
+
 ## [0.1.0] - 2026-06-28
 
 Initial open-source release. Multi-agent code review running freely on Zen
@@ -80,5 +128,7 @@ and any OpenAI-compatible or Anthropic provider.
 - **Web UI** - single-page chat, syntax highlighting, quota pill.
 - **MIT licence**.
 
-[Unreleased]: https://github.com/log0u7/consensus/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/log0u7/consensus/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/log0u7/consensus/compare/v0.1.0...v0.2.0
+[0.2.0-dev]: https://github.com/log0u7/consensus/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/log0u7/consensus/releases/tag/v0.1.0

@@ -133,3 +133,137 @@ async def test_unknown_topology_raises():
     )
     with pytest.raises(ValueError, match="Unknown topology"):
         await topologies.run(team, "spec")
+
+
+# ---------------------------------------------------------------------------
+# Topology: pipeline  (sequential planner -> executor -> verifier)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_pipeline_topology_emits_step_per_role(monkeypatch):
+    """Each role must emit one 'step' event, then a final 'result'."""
+    from src import llm, topologies
+
+    async def fake_complete(provider, model, user, system="", max_tokens=8000):
+        return f"output from {model}"
+
+    monkeypatch.setattr(llm, "complete", fake_complete)
+
+    team = roles_mod.load("sre")
+    assert team.topology == "pipeline"
+    topo = await topologies.run(team, "deploy redis", run_id="t1")
+    events = [e async for e in topo]
+
+    step_events = [e for e in events if e["type"] == "step"]
+    role_names  = [e["role"] for e in step_events]
+    assert role_names == list(team.roles.keys())
+    assert events[-1]["type"] == "result"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_topology_result_contains_outputs(monkeypatch):
+    from src import llm, topologies
+
+    async def fake_complete(provider, model, user, system="", max_tokens=8000):
+        return "step output"
+
+    monkeypatch.setattr(llm, "complete", fake_complete)
+
+    team = roles_mod.load("sre")
+    topo = await topologies.run(team, "spec", run_id="t2")
+    events = [e async for e in topo]
+    result = events[-1]["result"]
+
+    assert result["topology"] == "pipeline"
+    assert set(result["outputs"].keys()) == set(team.roles.keys())
+    for v in result["outputs"].values():
+        assert v == "step output"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_topology_accumulates_context(monkeypatch):
+    """Each role should see the previous role's output in its prompt."""
+    from src import llm, topologies
+
+    received_users: list[str] = []
+
+    async def fake_complete(provider, model, user, system="", max_tokens=8000):
+        received_users.append(user)
+        return f"[output of {model}]"
+
+    monkeypatch.setattr(llm, "complete", fake_complete)
+
+    team = roles_mod.load("sre")
+    topo = await topologies.run(team, "my task", run_id="t3")
+    [e async for e in topo]
+
+    # First call has no prior context
+    assert "Context so far" not in received_users[0]
+    # Subsequent calls accumulate context
+    for user in received_users[1:]:
+        assert "Context so far" in user
+
+
+# ---------------------------------------------------------------------------
+# Topology: loop  (iterative recon -> exploit -> report)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_loop_topology_respects_max_iterations(monkeypatch):
+    """When no role emits '[DONE]', the loop must stop at max_iterations."""
+    from src import llm, topologies
+
+    async def fake_complete(provider, model, user, system="", max_tokens=8000):
+        return "still working"
+
+    monkeypatch.setattr(llm, "complete", fake_complete)
+
+    team = roles_mod.load("pentest")
+    assert team.topology == "loop"
+    max_iter = 2
+    events = [e async for e in topologies.run_loop(team, "scan target", run_id="l1", max_iterations=max_iter)]
+
+    iter_events = [e for e in events if e["type"] == "iteration"]
+    seen_iterations = sorted({e["i"] for e in iter_events})
+    assert seen_iterations == list(range(1, max_iter + 1))
+    assert events[-1]["type"] == "result"
+    assert events[-1]["result"]["topology"] == "loop"
+
+
+@pytest.mark.asyncio
+async def test_loop_topology_stops_early_on_done(monkeypatch):
+    """When a role emits '[DONE]', the loop must stop before max_iterations."""
+    from src import llm, topologies
+
+    async def fake_complete(provider, model, user, system="", max_tokens=8000):
+        return "found it [DONE]"
+
+    monkeypatch.setattr(llm, "complete", fake_complete)
+
+    team = roles_mod.load("pentest")
+    events = [e async for e in topologies.run_loop(team, "scan", run_id="l2", max_iterations=5)]
+
+    iter_events = [e for e in events if e["type"] == "iteration"]
+    # Only one step event: first role of first iteration emitted [DONE]
+    assert len(iter_events) == 1
+    assert iter_events[0]["i"] == 1
+
+
+@pytest.mark.asyncio
+async def test_loop_topology_result_contains_outputs(monkeypatch):
+    from src import llm, topologies
+
+    async def fake_complete(provider, model, user, system="", max_tokens=8000):
+        return "output"
+
+    monkeypatch.setattr(llm, "complete", fake_complete)
+
+    team = roles_mod.load("pentest")
+    events = [e async for e in topologies.run_loop(team, "spec", run_id="l3", max_iterations=1)]
+    result = events[-1]["result"]
+
+    assert result["topology"] == "loop"
+    # Each role has a list of outputs (one per iteration)
+    for role_name in team.roles:
+        assert role_name in result["outputs"]
+        assert isinstance(result["outputs"][role_name], list)

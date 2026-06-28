@@ -8,6 +8,7 @@ retries (AUTO_LOW_QUOTA=1, default).
 """
 
 from . import config
+from .providers import resolve_name
 
 _low_quota = False
 
@@ -22,28 +23,19 @@ def set_low_quota(value: bool) -> bool:
     return _low_quota
 
 
-def _split_provider_model(ref: str) -> tuple[str, str]:
-    """Split a 'provider/model' string into (provider, model)."""
-    if "/" in ref:
-        provider, model = ref.split("/", 1)
-        return provider, model
-    # Fallback: assume zen if no provider prefix
-    return "zen", ref
-
-
 def coder_model() -> tuple[str, str]:
     ref = config.LOW_QUOTA_MODEL if _low_quota else config.CODER_MODEL
-    return _split_provider_model(ref)
+    return resolve_name(ref)
 
 
 def consensus_model() -> tuple[str, str]:
     ref = config.LOW_QUOTA_MODEL if _low_quota else config.CONSENSUS_MODEL
-    return _split_provider_model(ref)
+    return resolve_name(ref)
 
 
 def lead_model() -> tuple[str, str]:
     # Lead is never downgraded.
-    return _split_provider_model(config.LEAD_MODEL)
+    return resolve_name(config.LEAD_MODEL)
 
 
 def panel() -> list[dict]:

@@ -22,3 +22,4 @@ exclude = ['^tests/']
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-q"
+pythonpath = ["."]

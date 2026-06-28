@@ -64,13 +64,39 @@ Models use the `provider/model-id` format: `zen/deepseek-r1-0528`,
 2. Configure:
    ```
    cp .env.example .env
-   # edit .env: set ZEN_API_KEY
+   # edit .env: set ZEN_API_KEY and PG_PASSWORD (any string, e.g. "changeme")
    ```
 3. Start:
    ```
    make up
    ```
    Open http://localhost:8800
+
+### Fork in 5 minutes
+
+```
+git clone https://github.com/log0u7/consensus.git
+cd consensus
+cp .env.example .env
+# Required: ZEN_API_KEY and PG_PASSWORD
+# Optional: CODER_MODEL, LEAD_MODEL, REVIEW_PANEL (see .env.example)
+make up
+```
+
+That is it. The stack starts two containers: `consensus-app` (port 8800) and
+`consensus-pgvector` (Postgres + pgvector, used by the optional RAG feature).
+
+To run a task on the CLI instead of the UI:
+```
+make run SPEC="Write a Python function that validates an email address"
+```
+
+To add a new domain without touching application code:
+```
+cp teams/consensus.yaml teams/my-domain.yaml
+# edit my-domain.yaml: set topology, models, roles
+# optionally add skills/my-domain/SKILL.md
+```
 
 ## Teams and topologies
 
@@ -246,8 +272,18 @@ consensus/
     api.py        FastAPI + SSE
     static/       SPA + vendored highlight.js (BSD-3)
   tui/            Textual terminal UI
-  tests/          offline unit tests (120+ tests)
+  docs/           detailed documentation (teams, providers, RAG, UI)
+  tests/          offline unit tests (179+ tests)
 ```
+
+## Documentation
+
+| Topic                             | File                        |
+|-----------------------------------|-----------------------------|
+| Teams, topologies, adding a domain | [docs/teams.md](docs/teams.md) |
+| Providers, adding a provider      | [docs/providers.md](docs/providers.md) |
+| RAG: indexing, backends, opt-in   | [docs/rag.md](docs/rag.md)   |
+| Web UI, TUI, API endpoints        | [docs/ui.md](docs/ui.md)     |
 
 ## License
 

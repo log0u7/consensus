@@ -1,0 +1,792 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Consensus</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230e1116'/%3E%3Ccircle cx='5' cy='5' r='1.6' fill='%235aa0ff'/%3E%3Ccircle cx='11' cy='5' r='1.6' fill='%237ee0a0'/%3E%3Ccircle cx='8' cy='11' r='1.6' fill='%23ffd166'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/vendor/github-dark.min.css">
+<script src="/vendor/highlight.min.js"></script>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel2: #1c232c; --border: #2a313c;
+    --fg: #d7dde5; --muted: #8a94a3; --accent: #5aa0ff; --accent2: #7ee0a0;
+    --crit: #ff6b6b; --high: #ff9f43; --med: #ffd166; --low: #7ee0a0;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--sans);
+         display: flex; flex-direction: column; overflow: hidden; }
+  header { padding: 12px 18px; border-bottom: 1px solid var(--border);
+           display: flex; align-items: baseline; gap: 12px; flex: 0 0 auto; }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  header .spacer { flex: 1; }
+  header .verdict-slot { font-size: 12px; }
+
+  main { flex: 1 1 auto; display: grid; grid-template-columns: 1fr 1fr 1fr;
+         gap: 14px; padding: 14px; overflow: hidden; min-height: 0; }
+  @media (max-width: 1200px) { main { grid-template-columns: 1fr; overflow: auto; } }
+
+  .col { display: flex; flex-direction: column; gap: 14px; min-height: 0; overflow-y: auto; padding-right: 2px; }
+  @media (max-width: 1200px) { .col { overflow: visible; } }
+
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+          overflow: hidden; flex: 0 0 auto; display: flex; flex-direction: column; }
+  .card.grow { flex: 1 1 auto; min-height: 0; }
+  .card > h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+               margin: 0; padding: 9px 13px; border-bottom: 1px solid var(--border);
+               display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+  .card > .body { padding: 13px; overflow: auto; min-height: 0; }
+  .card.grow > .body { flex: 1 1 auto; }
+
+  textarea { width: 100%; min-height: 84px; resize: vertical; background: var(--panel2); color: var(--fg);
+             border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-family: var(--sans); font-size: 14px; }
+  .row { display: flex; gap: 10px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+  button { background: var(--accent); color: #06101f; border: none; border-radius: 6px;
+           padding: 9px 14px; font-weight: 600; cursor: pointer; font-size: 14px; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  label.chk { color: var(--muted); font-size: 13px; display: flex; gap: 6px; align-items: center; cursor: pointer; }
+  .hint { color: var(--muted); font-size: 12px; }
+  .status { color: var(--accent); font-size: 13px; margin-top: 10px; min-height: 18px; }
+  .empty { color: var(--muted); font-size: 13px; padding: 6px; }
+
+  pre { margin: 0; padding: 12px; background: #0b0e13; border: 1px solid var(--border); border-radius: 6px;
+        overflow: auto; max-height: 340px; font-family: var(--mono); font-size: 12.5px; line-height: 1.5; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 8px; align-items: center; }
+  .tabs button { background: var(--panel2); color: var(--muted); padding: 5px 10px; font-weight: 500; font-size: 12px; }
+  .tabs button.active { color: var(--fg); border: 1px solid var(--border); }
+  .tabs .spacer { flex: 1; }
+  .act { background: var(--panel2); color: var(--muted); padding: 5px 9px; font-weight: 500; font-size: 11.5px; border: 1px solid var(--border); }
+  .act:hover { color: var(--fg); }
+  .cost { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .cost b { color: var(--fg); font-weight: 600; }
+
+  /* consensus issues */
+  .issue { border: 1px solid var(--border); border-radius: 6px; padding: 10px; margin-bottom: 8px; background: var(--panel2); }
+  .issue .top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .issue .title { font-weight: 600; font-size: 13px; }
+  .badge { font-size: 11px; padding: 2px 7px; border-radius: 999px; font-weight: 700; white-space: nowrap; }
+  .sev-critical { background: rgba(255,107,107,.18); color: var(--crit); }
+  .sev-high { background: rgba(255,159,67,.18); color: var(--high); }
+  .sev-medium { background: rgba(255,209,102,.16); color: var(--med); }
+  .sev-low { background: rgba(126,224,160,.16); color: var(--low); }
+  .cat { background: rgba(90,160,255,.14); color: var(--accent); }
+  .score { font-family: var(--mono); font-size: 11px; color: var(--fg); background: #0b0e13;
+           border: 1px solid var(--border); padding: 2px 6px; border-radius: 4px; }
+  .flagged { color: var(--muted); font-size: 11.5px; margin-top: 5px; }
+  .desc { color: var(--fg); font-size: 12.5px; margin-top: 6px; opacity: .9; }
+
+  /* panel: expandable per reviewer */
+  details.reviewer { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 8px; background: var(--panel2); }
+  details.reviewer > summary { list-style: none; cursor: pointer; padding: 9px 11px; display: flex;
+                               align-items: center; gap: 8px; font-size: 13px; }
+  details.reviewer > summary::-webkit-details-marker { display: none; }
+  details.reviewer > summary::before { content: "\25B8"; color: var(--muted); font-size: 11px; transition: transform .1s; }
+  details.reviewer[open] > summary::before { transform: rotate(90deg); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+  .ok { background: var(--accent2); } .ko { background: var(--crit); }
+  .rev-name { font-weight: 600; }
+  .rev-meta { color: var(--muted); margin-left: auto; font-size: 12px; }
+  .rev-body { padding: 0 11px 10px 11px; }
+  .mini { border-left: 2px solid var(--border); padding: 6px 0 6px 10px; margin: 6px 0; }
+  .mini .title { font-size: 12.5px; font-weight: 600; }
+  .mini .desc { font-size: 12px; margin-top: 4px; }
+  .err { color: var(--crit); font-size: 12px; font-family: var(--mono); white-space: pre-wrap; word-break: break-word; }
+
+  /* chat */
+  .messages { display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 92%; padding: 9px 12px; border-radius: 10px; font-size: 13.5px; line-height: 1.5;
+         white-space: pre-wrap; word-wrap: break-word; }
+  .msg.user { align-self: flex-end; background: var(--accent); color: #06101f; }
+  .msg.lead { align-self: flex-start; background: var(--panel2); border: 1px solid var(--border); }
+  .chat-input { display: flex; gap: 8px; padding: 10px 13px; border-top: 1px solid var(--border); flex: 0 0 auto; }
+  .chat-input input { flex: 1; background: var(--panel2); color: var(--fg); border: 1px solid var(--border);
+                      border-radius: 6px; padding: 9px 10px; font-size: 14px; }
+
+  /* header pills (shared by quota, usage, verdict) */
+  .pill-wrap { position: relative; }
+  .pill { display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+          background: var(--panel2); color: var(--fg); border: 1px solid var(--border);
+          border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 600; }
+  .pill:hover { border-color: var(--accent); }
+  .pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .pop { position: absolute; right: 0; top: calc(100% + 8px); width: 280px; z-index: 50;
+         background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+         box-shadow: 0 8px 24px rgba(0,0,0,.4); padding: 12px; display: none; }
+  .pop.open { display: block; }
+  .pop h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .pop .line { font-size: 12.5px; margin: 4px 0; color: var(--fg); display: flex; justify-content: space-between; gap: 12px; }
+  .pop .line .k { color: var(--muted); }
+  .pop .rationale { font-size: 12.5px; line-height: 1.5; color: var(--fg); white-space: pre-wrap; margin-top: 6px; }
+  .pop .sub { font-size: 11px; color: var(--muted); margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+  /* verdict dot colors */
+  .v-APPROVE .dot { background: var(--accent2); }
+  .v-APPROVE_WITH_CHANGES .dot { background: var(--med); }
+  .v-REJECT .dot { background: var(--crit); }
+
+  /* quota indicator: dot-color states on the shared pill */
+  .pill.q-ok .dot { background: var(--accent2); }
+  .pill.q-low .dot { background: var(--high); }
+  .pill.q-limited .dot { background: var(--crit); }
+  .quota-toggle { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+                  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+  /* switch */
+  .switch { position: relative; width: 38px; height: 20px; flex: 0 0 auto; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch .track { position: absolute; inset: 0; background: var(--panel2); border: 1px solid var(--border);
+                   border-radius: 999px; transition: background .15s; cursor: pointer; }
+  .switch .track::before { content: ""; position: absolute; left: 2px; top: 1px; width: 16px; height: 16px;
+                           border-radius: 50%; background: var(--muted); transition: transform .15s, background .15s; }
+  .switch input:checked + .track { background: rgba(255,159,67,.3); border-color: var(--high); }
+  .switch input:checked + .track::before { transform: translateX(18px); background: var(--high); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Consensus</h1>
+  <span class="sub">multi-agent code review</span>
+  <span class="spacer"></span>
+
+  <!-- Usage / cost pill -->
+  <span class="pill-wrap" id="usageWrap" style="display:none">
+    <button class="pill" id="usagePill" aria-haspopup="dialog" aria-expanded="false" title="Run usage and cost">
+      <span class="dot"></span><span id="usageLabel"></span>
+    </button>
+    <div class="pop" id="usagePop" role="dialog" aria-label="Usage and cost">
+      <h3>Usage</h3>
+      <div class="line"><span class="k">calls</span> <span id="uCalls">0</span></div>
+      <div class="line"><span class="k">input tokens</span> <span id="uIn">0</span></div>
+      <div class="line"><span class="k">output tokens</span> <span id="uOut">0</span></div>
+      <div class="line"><span class="k">cost</span> <span id="uCost">—</span></div>
+      <div id="uSteps" class="sub"></div>
+    </div>
+  </span>
+
+  <!-- Verdict pill -->
+  <span class="pill-wrap" id="verdictWrap" style="display:none">
+    <button class="pill" id="verdictPill" aria-haspopup="dialog" aria-expanded="false" title="Lead verdict">
+      <span class="dot"></span><span id="verdictLabel"></span>
+    </button>
+    <div class="pop" id="verdictPop" role="dialog" aria-label="Verdict summary">
+      <h3>Verdict</h3>
+      <div class="line"><span class="k">decision</span> <span id="verdictDecision"></span></div>
+      <div class="rationale" id="verdictRationale"></div>
+    </div>
+  </span>
+
+  <!-- Quota pill -->
+  <span class="pill-wrap" id="quotaWrap">
+    <button class="pill q-ok" id="quotaPill" aria-haspopup="dialog" aria-expanded="false" title="Gateway quota">
+      <span class="dot"></span><span id="quotaLabel">Quota OK</span>
+    </button>
+    <div class="pop" id="quotaPop" role="dialog" aria-label="Quota settings">
+      <h3>Gateway quota</h3>
+      <div class="line" id="quotaState" style="display:block"></div>
+      <div class="line"><span class="k">coder</span> <span id="qCoder"></span></div>
+      <div class="line"><span class="k">consensus</span> <span id="qConsensus"></span></div>
+      <div class="line"><span class="k">lead (protected)</span> <span id="qLead"></span></div>
+      <div class="line"><span class="k">panel</span> <span id="qPanel"></span></div>
+      <div class="quota-toggle">
+        <span>Low-quota mode</span>
+        <label class="switch">
+          <input type="checkbox" id="quotaToggle">
+          <span class="track"></span>
+        </label>
+      </div>
+    </div>
+  </span>
+</header>
+
+<main>
+  <!-- Column 1: task + code + panel -->
+  <div class="col">
+    <div class="card">
+      <h2>Task</h2>
+      <div class="body">
+        <textarea id="spec" placeholder="Describe the coding task (e.g. 'Write an Ansible role to deploy the Zabbix agent on Windows hosts')"></textarea>
+        <div class="row">
+          <button id="runBtn">Run consensus</button>
+          <label class="chk"><input type="checkbox" id="useRag"> RAG</label>
+        </div>
+        <div class="status" id="status"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Code</h2>
+      <div class="body">
+        <div class="tabs">
+          <button id="tabFinal" class="active">Final (Lead)</button>
+          <button id="tabDraft">Draft (Coder)</button>
+          <span class="spacer"></span>
+          <button id="copyBtn" class="act" disabled>Copy</button>
+          <button id="dlBtn" class="act" disabled>Download</button>
+          <button id="reportBtn" class="act" disabled>Report</button>
+        </div>
+        <div class="tabs" id="filesBar" style="display:none">
+          <select id="fileSel" class="act"></select>
+          <span class="spacer"></span>
+          <select id="fmtSel" class="act"></select>
+          <button id="archiveBtn" class="act">Archive</button>
+        </div>
+        <pre id="code"><code class="empty">Run a task to see the produced code.</code></pre>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Panel <span class="hint" id="panelCount"></span></h2>
+      <div class="body" id="panel"><div class="empty">No run yet. Each reviewer is expandable.</div></div>
+    </div>
+  </div>
+
+  <!-- Column 2: chat with the Lead -->
+  <div class="col">
+    <div class="card grow">
+      <h2>Chat with the Lead</h2>
+      <div class="body" id="messages"><div class="empty">Run a task first, then ask the Lead about the code or the review.</div></div>
+      <div class="chat-input">
+        <input id="chatInput" placeholder="Ask the Lead..." disabled>
+        <button id="filesBtn" class="act" disabled title="Regenerate the project file tree from the conversation">Files</button>
+        <button id="sendBtn" disabled>Send</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Column 3: consensus -->
+  <div class="col">
+    <div class="card grow">
+      <h2>Consensus</h2>
+      <div class="body" id="consensus"><div class="empty">No run yet.</div></div>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let sessionId = null;
+let draftCode = "", finalCode = "";
+let codeLang = "", lastResult = null;
+let projectFiles = [];   // [{path, language, content}] when multi-file
+let PANEL_SIZE = 3;
+fetch("/api/health").then(r => r.json()).then(d => { if (d.panel_size) PANEL_SIZE = d.panel_size; }).catch(()=>{});
+
+// Populate the archive-format selector from the server's supported list.
+fetch("/api/archive/formats").then(r => r.json()).then(d => {
+  const sel = $("fmtSel"); sel.innerHTML = "";
+  (d.formats || ["zip"]).forEach(f => { const o = document.createElement("option"); o.value = f; o.textContent = f; sel.appendChild(o); });
+}).catch(()=>{});
+
+// Guess a highlight.js language from a file extension.
+const EXT_LANG = { py:"python", js:"javascript", ts:"typescript", go:"go", rs:"rust", java:"java", cpp:"cpp", c:"c", cs:"csharp", sh:"bash", yml:"yaml", yaml:"yaml", json:"json", html:"html", css:"css", sql:"sql", rb:"ruby", php:"php", md:"markdown", toml:"ini", ini:"ini", j2:"django", tf:"hcl", dockerfile:"dockerfile" };
+function langFromPath(p){ const m = (p||"").toLowerCase().match(/\.([a-z0-9]+)$/); return m ? (EXT_LANG[m[1]] || "") : ""; }
+
+function escapeHtml(s){ return (s||"").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+function sevClass(s){ return "badge sev-" + (s||"medium").toLowerCase(); }
+
+// --- Header popovers (shared open/close: only one open at a time) ----------
+function openPop(popId, pillId){
+  document.querySelectorAll(".pop.open").forEach(p => {
+    if (p.id !== popId){ p.classList.remove("open"); const b = p.parentElement.querySelector(".pill"); if (b) b.setAttribute("aria-expanded","false"); }
+  });
+  const pop = $(popId), pill = $(pillId);
+  const show = !pop.classList.contains("open");
+  pop.classList.toggle("open", show);
+  pill.setAttribute("aria-expanded", show ? "true" : "false");
+}
+function closeAllPops(){
+  document.querySelectorAll(".pop.open").forEach(p => p.classList.remove("open"));
+  document.querySelectorAll(".pill[aria-expanded='true']").forEach(b => b.setAttribute("aria-expanded","false"));
+}
+document.addEventListener("click", (e) => { if (!e.target.closest(".pill-wrap")) closeAllPops(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeAllPops(); });
+
+// --- Usage / cost pill -----------------------------------------------------
+function fmtCost(cs){ return cs.cost_known ? ("$" + Number(cs.cost).toFixed(5)) : "cost n/a"; }
+function renderCost(cs){
+  if (!cs || !cs.calls){ $("usageWrap").style.display = "none"; return; }
+  $("usageWrap").style.display = "";
+  $("usageLabel").textContent = `${cs.calls} calls \u00b7 ${fmtCost(cs)}`;
+  $("uCalls").textContent = cs.calls;
+  $("uIn").textContent = cs.input_tokens;
+  $("uOut").textContent = cs.output_tokens;
+  $("uCost").textContent = fmtCost(cs);
+}
+// Per-step breakdown (from the final result's usages array).
+function renderUsageSteps(usages){
+  const el = $("uSteps");
+  if (!usages || !usages.length){ el.innerHTML = ""; return; }
+  const rows = usages.map(u => {
+    const c = (u.cost != null) ? ("$" + Number(u.cost).toFixed(5)) : "—";
+    return `<div class="line"><span class="k">${escapeHtml(u.step||"?")}</span> <span>${u.input_tokens}/${u.output_tokens} \u00b7 ${c}</span></div>`;
+  }).join("");
+  el.innerHTML = "<div class='k' style='margin-bottom:4px'>per step (in/out · cost)</div>" + rows;
+}
+$("usagePill").onclick = (e) => { e.stopPropagation(); openPop("usagePop","usagePill"); };
+
+// --- Quota indicator -------------------------------------------------------
+function renderQuota(profile){
+  const pill = $("quotaPill"), label = $("quotaLabel");
+  const low = !!profile.low_quota;
+  pill.classList.toggle("q-low", low);
+  pill.classList.toggle("q-ok", !low);
+  pill.classList.remove("q-limited");
+  label.textContent = low ? "Low-quota" : "Quota OK";
+  $("quotaToggle").checked = low;
+  $("quotaState").textContent = low
+    ? "Degraded profile active to ease provider pressure."
+    : "Full profile. Enable low-quota if you hit rate limits.";
+  $("qCoder").textContent = profile.coder_model || "";
+  $("qConsensus").textContent = profile.consensus_model || "";
+  $("qLead").textContent = profile.lead_model || "";
+  $("qPanel").textContent = (profile.panel || []).join(", ");
+}
+function markRateLimited(){
+  const pill = $("quotaPill");
+  pill.classList.remove("q-ok","q-low"); pill.classList.add("q-limited");
+  $("quotaLabel").textContent = "Rate-limited";
+  setTimeout(() => { refreshQuota(); }, 8000);
+}
+async function refreshQuota(){
+  try { renderQuota(await (await fetch("/api/quota")).json()); } catch (_){}
+}
+$("quotaPill").onclick = (e) => { e.stopPropagation(); openPop("quotaPop","quotaPill"); };
+$("quotaToggle").onchange = async (e) => {
+  try {
+    const res = await fetch("/api/quota", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ low_quota: e.target.checked })
+    });
+    const profile = await res.json();
+    renderQuota(profile);
+    if (profile.panel) PANEL_SIZE = profile.panel.length;
+  } catch (_){ refreshQuota(); }
+};
+refreshQuota();
+
+// hljs language ids differ slightly from our free-form language field.
+const LANG_MAP = { golang:"go", "c++":"cpp", "c#":"csharp", sh:"bash", shell:"bash", yml:"yaml", py:"python", js:"javascript", ts:"typescript" };
+function hlLang(lang){ const l = (lang||"").trim().toLowerCase(); return LANG_MAP[l] || l; }
+
+function renderPanel(reviews){
+  const el = $("panel"); el.innerHTML = "";
+  $("panelCount").textContent = reviews.length ? `(${reviews.length})` : "";
+  reviews.forEach(r => {
+    const d = document.createElement("details");
+    d.className = "reviewer";
+    const meta = r.ok ? `${r.issues.length} issues` : "failed";
+    d.innerHTML =
+      `<summary><span class="dot ${r.ok?'ok':'ko'}"></span>`
+      + `<span class="rev-name">${escapeHtml(r.reviewer)}</span>`
+      + `<span class="rev-meta">${meta}</span></summary>`;
+    const body = document.createElement("div");
+    body.className = "rev-body";
+    if (!r.ok){
+      body.innerHTML = `<div class="err">${escapeHtml(r.error)}</div>`;
+    } else if (!r.issues.length){
+      body.innerHTML = `<div class="empty">No issues from this reviewer.</div>`;
+    } else {
+      r.issues.forEach(i => {
+        const m = document.createElement("div");
+        m.className = "mini";
+        m.innerHTML =
+          `<div class="top"><span class="${sevClass(i.severity)}">${i.severity}</span> `
+          + `<span class="badge cat">${escapeHtml(i.category)}</span> `
+          + `<span class="title">${escapeHtml(i.title)}</span></div>`
+          + (i.description ? `<div class="desc">${escapeHtml(i.description)}</div>` : "")
+          + (i.location ? `<div class="flagged">@ ${escapeHtml(i.location)}</div>` : "");
+        body.appendChild(m);
+      });
+    }
+    d.appendChild(body);
+    el.appendChild(d);
+  });
+}
+
+function renderConsensus(c){
+  const el = $("consensus"); el.innerHTML = "";
+  if (c.summary){
+    const s = document.createElement("div");
+    s.className = "desc"; s.style.marginBottom = "12px";
+    s.textContent = c.summary;
+    el.appendChild(s);
+  }
+  if (!c.issues.length){ el.innerHTML += '<div class="empty">No issues found by the panel.</div>'; return; }
+  c.issues.forEach(it => {
+    const pct = Math.round((it.consensus_score||0)*100) + "%";
+    const div = document.createElement("div");
+    div.className = "issue";
+    const top = document.createElement("div"); top.className = "top";
+    top.innerHTML = `<span class="score">${pct}</span>`
+      + `<span class="${sevClass(it.severity)}">${it.severity}</span>`
+      + `<span class="badge cat">${escapeHtml(it.category)}</span>`
+      + `<span class="title">${escapeHtml(it.title)}</span>`;
+    div.appendChild(top);
+    if (it.description){ const dd = document.createElement("div"); dd.className="desc"; dd.textContent = it.description; div.appendChild(dd); }
+    const fb = document.createElement("div"); fb.className="flagged";
+    fb.textContent = "flagged by: " + (it.flagged_by||[]).join(", ");
+    div.appendChild(fb);
+    el.appendChild(div);
+  });
+}
+
+const VERDICT_LABEL = { APPROVE: "Approved", APPROVE_WITH_CHANGES: "Approved w/ changes", REJECT: "Rejected" };
+function renderVerdict(v, rationale){
+  const wrap = $("verdictWrap"), pill = $("verdictPill");
+  if (!v){ wrap.style.display = "none"; return; }
+  wrap.style.display = "";
+  pill.classList.remove("v-APPROVE","v-APPROVE_WITH_CHANGES","v-REJECT");
+  pill.classList.add("v-" + v);
+  $("verdictLabel").textContent = VERDICT_LABEL[v] || v;
+  $("verdictDecision").textContent = v;
+  $("verdictRationale").textContent = rationale || "(no rationale)";
+}
+$("verdictPill").onclick = (e) => { e.stopPropagation(); openPop("verdictPop","verdictPill"); };
+
+// Render text into the code pane with highlighting for the given language.
+function renderCodeText(text, lang){
+  const pre = $("code");
+  pre.innerHTML = "<code></code>";
+  const codeEl = pre.firstChild;
+  codeEl.textContent = text || "(empty)";
+  const hl = hlLang(lang);
+  if (window.hljs && text && text !== "(empty)"){
+    try {
+      const res = hl && hljs.getLanguage(hl)
+        ? hljs.highlight(text, { language: hl })
+        : hljs.highlightAuto(text);
+      codeEl.innerHTML = res.value;
+      codeEl.classList.add("hljs");
+    } catch (_){ /* leave as plain text */ }
+  }
+}
+
+let currentTab = "final";
+function setCodeTab(which){
+  currentTab = which;
+  $("tabFinal").classList.toggle("active", which==="final");
+  $("tabDraft").classList.toggle("active", which==="draft");
+  // In multi-file mode the Final tab shows the selected file; Draft shows blob.
+  if (which==="final" && projectFiles.length){
+    showSelectedFile();
+    return;
+  }
+  renderCodeText(which==="final" ? finalCode : draftCode, codeLang);
+}
+
+// Multi-file: populate the file selector and show the first file.
+function setFilesMode(files){
+  projectFiles = files || [];
+  const bar = $("filesBar");
+  if (!projectFiles.length){ bar.style.display = "none"; return; }
+  bar.style.display = "flex";
+  const sel = $("fileSel"); sel.innerHTML = "";
+  projectFiles.forEach((f, i) => { const o = document.createElement("option"); o.value = String(i); o.textContent = f.path; sel.appendChild(o); });
+  sel.value = "0";
+  showSelectedFile();
+}
+function showSelectedFile(){
+  const i = parseInt($("fileSel").value || "0", 10);
+  const f = projectFiles[i]; if (!f) return;
+  renderCodeText(f.content, f.language || langFromPath(f.path));
+}
+$("fileSel").onchange = showSelectedFile;
+
+function currentCode(){
+  if (currentTab==="final" && projectFiles.length){
+    const f = projectFiles[parseInt($("fileSel").value||"0",10)]; return f ? f.content : "";
+  }
+  return currentTab==="final" ? finalCode : draftCode;
+}
+$("tabFinal").onclick = () => setCodeTab("final");
+$("tabDraft").onclick = () => setCodeTab("draft");
+
+// Download the project as an archive in the selected format (built server-side).
+async function downloadArchive(){
+  if (!projectFiles.length) return;
+  const fmt = $("fmtSel").value || "zip";
+  $("archiveBtn").disabled = true;
+  try {
+    const res = await fetch("/api/archive", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ files: projectFiles, format: fmt, root: "project" })
+    });
+    if (!res.ok){ throw new Error("HTTP " + res.status + ": " + await res.text()); }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "project." + (fmt);
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+  } catch (e){
+    $("status").textContent = "Archive error: " + e.message;
+  } finally {
+    $("archiveBtn").disabled = false;
+  }
+}
+$("archiveBtn").onclick = downloadArchive;
+
+function download(filename, text, type){
+  const blob = new Blob([text], { type: type || "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
+const EXT = { python:"py", javascript:"js", typescript:"ts", go:"go", rust:"rs", java:"java", cpp:"cpp", csharp:"cs", bash:"sh", yaml:"yaml", json:"json", html:"html", sql:"sql", ruby:"rb", php:"php" };
+function codeFilename(){ const ext = EXT[hlLang(codeLang)] || "txt"; return `code.${ext}`; }
+
+function buildReport(r){
+  const lines = [];
+  lines.push(`# Consensus report`, "");
+  lines.push(`**Verdict:** ${r.verdict}`, "");
+  if (r.rationale){ lines.push(`## Rationale`, "", r.rationale, ""); }
+  lines.push(`## Spec`, "", r.spec, "");
+  lines.push(`## Consensus`, "");
+  if (r.consensus.summary) lines.push(r.consensus.summary, "");
+  (r.consensus.issues||[]).forEach(it => {
+    const pct = Math.round((it.consensus_score||0)*100);
+    lines.push(`- [${pct}% | ${it.severity} | ${it.category}] ${it.title}` +
+      (it.flagged_by && it.flagged_by.length ? ` (flagged by: ${it.flagged_by.join(", ")})` : ""));
+    if (it.description) lines.push(`  - ${it.description}`);
+  });
+  lines.push("", `## Panel`, "");
+  (r.reviews||[]).forEach(rv => {
+    lines.push(`- ${rv.reviewer}: ${rv.ok ? (rv.issues.length + " issues") : ("FAILED - " + rv.error)}`);
+  });
+  if (r.rag_sources && r.rag_sources.length){
+    lines.push("", `## RAG context`, "");
+    r.rag_sources.forEach(s => lines.push(`- ${s.source}#${s.chunk_idx} (score ${s.score})`));
+  }
+  const cs = r.cost_summary;
+  if (cs){
+    lines.push("", `## Usage`, "");
+    const cost = cs.cost_known ? ("$" + cs.cost) : "n/a";
+    lines.push(`- ${cs.calls} calls, ${cs.input_tokens} in / ${cs.output_tokens} out tokens, cost ${cost}`);
+  }
+  lines.push("", `## Final code`, "", "```" + hlLang(r.language||""), r.final_code || r.code, "```");
+  return lines.join("\n");
+}
+
+$("copyBtn").onclick = async () => {
+  try { await navigator.clipboard.writeText(currentCode()); $("copyBtn").textContent = "Copied"; setTimeout(()=>$("copyBtn").textContent="Copy", 1200); }
+  catch (_){ $("copyBtn").textContent = "Copy failed"; setTimeout(()=>$("copyBtn").textContent="Copy", 1200); }
+};
+$("dlBtn").onclick = () => download(codeFilename(), currentCode());
+$("reportBtn").onclick = () => { if (lastResult) download("consensus-report.md", buildReport(lastResult), "text/markdown"); };
+
+function addMsg(role, text){
+  const m = $("messages");
+  if (m.querySelector(".empty")) m.innerHTML = '<div class="messages"></div>';
+  let wrap = m.querySelector(".messages");
+  if (!wrap){ wrap = document.createElement("div"); wrap.className="messages"; m.appendChild(wrap); }
+  const d = document.createElement("div");
+  d.className = "msg " + (role==="user"?"user":"lead");
+  d.textContent = text;
+  wrap.appendChild(d); m.scrollTop = m.scrollHeight;
+  return d;
+}
+
+// Read an SSE response body, invoking onEvent(parsedJson) per data: event.
+async function readSSE(res, onEvent){
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  while (true){
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf("\n\n")) !== -1){
+      const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
+      const line = chunk.split("\n").find(l => l.startsWith("data:"));
+      if (!line) continue;
+      let evt; try { evt = JSON.parse(line.slice(5).trim()); } catch (_){ continue; }
+      onEvent(evt);
+    }
+  }
+}
+
+// Show which RAG chunks were injected (if any), at the top of the consensus col.
+function renderRagNote(sources){
+  if (!sources || !sources.length) return;
+  const el = $("consensus");
+  const note = document.createElement("div");
+  note.className = "desc";
+  note.style.cssText = "margin-bottom:12px;border-left:2px solid var(--accent);padding-left:8px";
+  const items = sources.map(s => `${escapeHtml(s.source)}#${s.chunk_idx} (${s.score})`).join("<br>");
+  note.innerHTML = `<b>RAG context</b> &mdash; ${sources.length} chunk(s):<br>${items}`;
+  el.insertBefore(note, el.firstChild);
+}
+
+// Apply the final, full PipelineResult to the UI (shared by stream/non-stream).
+function applyResult(r){
+  lastResult = r;
+  codeLang = r.language || "";
+  draftCode = r.code; finalCode = r.final_code || r.code;
+  setFilesMode(r.files || []);
+  setCodeTab("final");
+  renderPanel(r.reviews);
+  renderConsensus(r.consensus);
+  renderRagNote(r.rag_sources);
+  renderVerdict(r.verdict, r.rationale);
+  renderCost(r.cost_summary);
+  renderUsageSteps(r.usages);
+  $("copyBtn").disabled = false; $("dlBtn").disabled = false; $("reportBtn").disabled = false;
+  $("messages").innerHTML = "";
+  addMsg("lead", "Verdict: " + r.verdict + "\n\n" + r.rationale);
+  $("chatInput").disabled = false; $("sendBtn").disabled = false; $("filesBtn").disabled = false;
+}
+
+// Chat-A: ask the Lead to regenerate the project file tree on demand.
+async function regenFiles(){
+  if (!sessionId) return;
+  $("filesBtn").disabled = true;
+  const old = $("status").textContent;
+  $("status").textContent = "Regenerating file tree...";
+  try {
+    const res = await fetch("/api/chat/regen-artifacts", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ session_id: sessionId })
+    });
+    if (!res.ok){ throw new Error("HTTP " + res.status + ": " + await res.text()); }
+    const data = await res.json();
+    if (data.files && data.files.length){
+      setFilesMode(data.files);
+      setCodeTab("final");
+      addMsg("lead", "Updated the file tree: " + data.files.length + " file(s). Use the file selector and Archive button.");
+      $("status").textContent = "File tree updated (" + data.files.length + " files).";
+    } else {
+      $("status").textContent = "No file tree returned.";
+    }
+  } catch (e){
+    $("status").textContent = "Regen error: " + e.message;
+  } finally {
+    $("filesBtn").disabled = false;
+  }
+}
+$("filesBtn").onclick = regenFiles;
+
+// Turn a raw error into a readable message; quota (429) is the common case.
+function friendlyError(msg){
+  msg = String(msg || "");
+  if (/\b429\b|too many requests/i.test(msg)){
+    return "Gateway quota exhausted (429). Wait and re-run; quotas are tighter outside working hours.";
+  }
+  return msg;
+}
+
+async function runConsensus(){
+  const spec = $("spec").value.trim();
+  if (!spec){ $("status").textContent = "Enter a task first."; return; }
+  $("runBtn").disabled = true;
+  // Reset views for a fresh run.
+  $("panel").innerHTML = '<div class="empty">Coder writing...</div>';
+  $("consensus").innerHTML = '<div class="empty">Waiting for the panel...</div>';
+  renderVerdict(""); renderCost(null); renderUsageSteps([]);
+  const liveReviews = [];
+  let resultSeen = false;
+  $("status").textContent = "Coder writing...";
+  try {
+    const res = await fetch("/api/run/stream", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({spec, use_rag: $("useRag").checked})
+    });
+    if (!res.ok || !res.body){ throw new Error("HTTP " + res.status + ": " + (res.body ? await res.text() : "")); }
+    await readSSE(res, (evt) => {
+      if (evt.usage) renderCost(evt.usage);   // live cost from the first event on
+      if (evt.type === "code"){
+        codeLang = evt.language || "";
+        draftCode = evt.code; finalCode = evt.code;
+        setCodeTab("final");
+        $("panel").innerHTML = '<div class="empty">Panel reviewing in parallel...</div>';
+        $("status").textContent = "Panel reviewing...";
+      } else if (evt.type === "review"){
+        liveReviews.push(evt.review);
+        renderPanel(liveReviews);
+        $("status").textContent = `Panel reviewing... (${liveReviews.length}/${PANEL_SIZE})`;
+      } else if (evt.type === "consensus"){
+        renderConsensus(evt.consensus);
+        $("status").textContent = "Lead deciding...";
+      } else if (evt.type === "result"){
+        resultSeen = true;
+        sessionId = evt.session_id;
+        applyResult(evt.result);
+        $("status").textContent = "Done. Talk to the Lead in the middle column.";
+      } else if (evt.type === "error"){
+        throw new Error(evt.error);
+      }
+    });
+    // No automatic re-run: a failed/interrupted stream surfaces an error and
+    // the user re-runs manually with the button (never silently doubles work).
+    if (!resultSeen) throw new Error("Run did not complete (stream ended early). Click Run to retry.");
+  } catch (e){
+    $("status").textContent = "Error: " + friendlyError(e.message);
+    if (/\b429\b|too many requests|rate.?limit/i.test(String(e.message))) markRateLimited();
+  } finally {
+    $("runBtn").disabled = false;
+  }
+}
+$("runBtn").onclick = runConsensus;
+
+async function sendChatNonStream(txt, pending){
+  const res = await fetch("/api/chat", {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({session_id: sessionId, message: txt})
+  });
+  if (!res.ok){ throw new Error("HTTP " + res.status); }
+  const data = await res.json();
+  pending.textContent = data.reply;
+}
+
+async function sendChat(){
+  const txt = $("chatInput").value.trim();
+  if (!txt || !sessionId) return;
+  $("chatInput").value = "";
+  addMsg("user", txt);
+  const pending = addMsg("lead", "...");
+  $("sendBtn").disabled = true;
+  try {
+    const res = await fetch("/api/chat/stream", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({session_id: sessionId, message: txt})
+    });
+    if (!res.ok || !res.body){ throw new Error("HTTP " + res.status); }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "", acc = "", streamErr = null;
+    pending.textContent = "";
+    while (true){
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      // SSE events are separated by a blank line.
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) !== -1){
+        const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
+        const line = chunk.split("\n").find(l => l.startsWith("data:"));
+        if (!line) continue;
+        let evt; try { evt = JSON.parse(line.slice(5).trim()); } catch (_){ continue; }
+        if (evt.delta){ acc += evt.delta; pending.textContent = acc; $("messages").scrollTop = $("messages").scrollHeight; }
+        else if (evt.error){ streamErr = evt.error; }
+      }
+    }
+    if (streamErr) throw new Error(streamErr);
+    if (!acc) pending.textContent = "(no response)";
+  } catch (e){
+    // Fall back to the non-streaming endpoint once if streaming failed early.
+    try { await sendChatNonStream(txt, pending); }
+    catch (e2){ pending.textContent = "Error: " + (e2.message || e.message); }
+  } finally {
+    $("sendBtn").disabled = false;
+    $("messages").scrollTop = $("messages").scrollHeight;
+  }
+}
+$("sendBtn").onclick = sendChat;
+$("chatInput").addEventListener("keydown", (e) => { if (e.key === "Enter") sendChat(); });
+</script>
+</body>
+</html>

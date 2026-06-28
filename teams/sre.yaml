@@ -1,0 +1,32 @@
+# SRE / DevOps / Infra platform team.
+# Topology: sequential pipeline - planner -> executor -> verifier.
+topology: pipeline
+sandbox: false
+
+roles:
+  planner:
+    model: zen/deepseek-r1-0528
+    fallback: []
+    max_tokens: 8000
+    skills: [sre]
+    tools: []
+    rag_ns: infra-docs
+    sandbox: false
+
+  executor:
+    model: zen/deepseek-v3-0324
+    fallback: []
+    max_tokens: 8000
+    skills: [sre, coding]
+    tools: []          # add MCP tool names here when available (e.g. k8s-mcp)
+    rag_ns: ""
+    sandbox: false
+
+  verifier:
+    model: zen/deepseek-r1-0528
+    fallback: []
+    max_tokens: 8000
+    skills: [sre, review]
+    tools: []
+    rag_ns: ""
+    sandbox: false

@@ -1,0 +1,15 @@
+.env
+.env.active
+.env.*
+!.env.example
+*.pem
+__pycache__/
+*.pyc
+.venv/
+.venv-dev/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+docs-projet/*
+!docs-projet/.gitkeep
+rag.db

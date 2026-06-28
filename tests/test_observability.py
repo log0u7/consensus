@@ -28,7 +28,8 @@ async def test_run_streaming_logs_run_id(monkeypatch, caplog):
     monkeypatch.setattr(agents, "build_consensus", fake_consensus)
     monkeypatch.setattr(agents, "lead_verdict", fake_verdict)
 
-    with caplog.at_level(logging.INFO, logger="src.pipeline"):
+    # Logs are emitted by src.topologies (the dispatcher); capture both.
+    with caplog.at_level(logging.INFO, logger="src"):
         events = [e async for e in pipeline.run_streaming("spec", run_id="testid42")]
 
     assert any(e["type"] == "result" for e in events)

@@ -1,0 +1,38 @@
+# Standard code review team.
+# Topology: coder -> parallel panel -> consensus aggregator -> lead.
+# This manifest reproduces the original hardcoded pipeline exactly.
+topology: consensus
+sandbox: false
+
+roles:
+  coder:
+    model: zen/deepseek-v3-0324
+    fallback: []
+    max_tokens: 8000
+    skills: []
+    tools: []
+    rag_ns: ""
+    sandbox: false
+
+  reviewer:
+    # Explicit panel members. Remove 'members' to fall back to config.PANEL.
+    members:
+      - name: deepseek-coder
+        model: zen/deepseek-v3-0324
+      - name: qwen3-coder
+        model: zen/qwen3-coder
+      - name: mimo-vl
+        model: zen/mimo-vl-7b-rl
+    fallback: []
+    max_tokens: 8000
+    sandbox: false
+
+  consensus:
+    model: zen/deepseek-r1-0528
+    fallback: []
+    max_tokens: 8000
+
+  lead:
+    model: zen/deepseek-r1-0528
+    fallback: []
+    max_tokens: 16000

@@ -129,6 +129,20 @@ class Artifact(BaseModel):
         return sanitize_path(v)
 
 
+class SandboxResult(BaseModel):
+    """Execution result from the sandbox (optional, populated when sandbox=true)."""
+    stdout: str = ""
+    stderr: str = ""
+    exit_code: int = 0
+    timed_out: bool = False
+    skipped: bool = False
+    engine: str = ""
+
+    @property
+    def success(self) -> bool:
+        return self.exit_code == 0 and not self.timed_out and not self.skipped
+
+
 class PipelineResult(BaseModel):
     spec: str
     code: str
@@ -140,5 +154,6 @@ class PipelineResult(BaseModel):
     rationale: str = ""
     files: list[Artifact] = []  # multi-file solution; empty for single-file
     rag_sources: list[dict] = []  # injected RAG chunks: {source, chunk_idx, score}
+    execution: SandboxResult | None = None  # populated when sandbox=true
     usages: list[Usage] = []
     cost_summary: CostSummary = CostSummary()

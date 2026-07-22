@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="consensus.webp">
+    <img src="consensus.webp" alt="Consensus" width="800">
+  </picture>
+</p>
+
 # Consensus
 
 Multi-agent orchestration running on any OpenAI-compatible or Anthropic provider.

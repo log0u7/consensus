@@ -5,6 +5,12 @@
   </picture>
 </p>
 
+[![CI](https://github.com/log0u7/consensus/actions/workflows/ci.yml/badge.svg)](https://github.com/log0u7/consensus/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
+[![code style: ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Checked with mypy](https://img.shields.io/badge/checked%20with-mypy-blue.svg)](https://mypy-lang.org/)
+
 # Consensus
 
 Multi-agent orchestration running on any OpenAI-compatible or Anthropic provider.

@@ -377,7 +377,7 @@ function renderPanel(reviews){
   reviews.forEach(r => {
     const d = document.createElement("details");
     d.className = "reviewer";
-    const meta = r.ok ? `${r.issues.length} issues` : "failed";
+    const meta = r.ok ? `${(r.issues||[]).length} issues` : "failed";
     d.innerHTML =
       `<summary><span class="dot ${r.ok?'ok':'ko'}"></span>`
       + `<span class="rev-name">${escapeHtml(r.reviewer)}</span>`
@@ -414,7 +414,7 @@ function renderConsensus(c){
     s.textContent = c.summary;
     el.appendChild(s);
   }
-  if (!c.issues.length){ el.innerHTML += '<div class="empty">No issues found by the panel.</div>'; return; }
+  if (!c.issues || !c.issues.length){ el.innerHTML += '<div class="empty">No issues found by the panel.</div>'; return; }
   c.issues.forEach(it => {
     const pct = Math.round((it.consensus_score||0)*100) + "%";
     const div = document.createElement("div");
@@ -630,15 +630,15 @@ function applyResult(r){
   draftCode = r.code; finalCode = r.final_code || r.code;
   setFilesMode(r.files || []);
   setCodeTab("final");
-  renderPanel(r.reviews);
-  renderConsensus(r.consensus);
+  renderPanel(r.reviews || []);
+  if (r.consensus) renderConsensus(r.consensus);
   renderRagNote(r.rag_sources);
-  renderVerdict(r.verdict, r.rationale);
+  if (r.verdict) renderVerdict(r.verdict, r.rationale);
   renderCost(r.cost_summary);
-  renderUsageSteps(r.usages);
+  renderUsageSteps(r.usages || []);
   $("copyBtn").disabled = false; $("dlBtn").disabled = false; $("reportBtn").disabled = false;
   $("messages").innerHTML = "";
-  addMsg("lead", "Verdict: " + r.verdict + "\n\n" + r.rationale);
+  addMsg("lead", "Verdict: " + (r.verdict || "?") + "\n\n" + (r.rationale || "(no rationale)"));
   $("chatInput").disabled = false; $("sendBtn").disabled = false; $("filesBtn").disabled = false;
 }
 

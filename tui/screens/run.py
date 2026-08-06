@@ -107,9 +107,24 @@ class RunScreen(Screen):
             yield Checkbox("Use RAG", id="use-rag-toggle", value=False)
         yield RichLog(id="run-output", highlight=True, max_lines=10000, markup=True)
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         spec_area = self.query_one("#run-spec-area", TextArea)
         spec_area.focus()
+        await self._refresh_status()
+
+    async def _refresh_status(self) -> None:
+        """Probe the API connection and quota state for the status bar."""
+        status_bar = self.query_one(StatusBar)
+        try:
+            await self._api_client.health()
+            status_bar.connected = True
+        except Exception:
+            status_bar.connected = False
+        try:
+            quota = await self._api_client.get_quota()
+            status_bar.update_from_quota(quota)
+        except Exception:
+            pass
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "run-button":

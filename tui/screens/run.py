@@ -20,14 +20,6 @@ class RunStarted(Message):
     """Emitted when a run starts (no data)."""
 
 
-class RunEvent(Message):
-    """A new SSE event arrived from the pipeline."""
-
-    def __init__(self, event: dict[str, Any]) -> None:
-        super().__init__()
-        self.event = event
-
-
 class RunDone(Message):
     """Pipeline completed (result or error)."""
 
@@ -149,7 +141,6 @@ class RunScreen(Screen):
 
         try:
             async for event in api.run_stream(spec, use_rag=False):
-                self.post_message(RunEvent(event))
                 self._handle_event(output, event)
 
                 if event.get("type") == "result":

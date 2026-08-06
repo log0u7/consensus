@@ -7,40 +7,12 @@ from typing import Any
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
-from textual.message import Message
 from textual.screen import Screen
 from textual.widgets import Button, Header, Label, RichLog, Static, TextArea
 
 from tui import esc
 from tui.api import APIClient
 from tui.widgets.status_bar import StatusBar
-
-
-class ChatMessage(Message):
-    """A delta chunk arrived in the chat stream."""
-
-    def __init__(self, delta: str) -> None:
-        super().__init__()
-        self.delta = delta
-
-
-class ChatDone(Message):
-    """Chat stream completed."""
-
-    def __init__(self, usage: dict[str, Any] | None, error: str | None) -> None:
-        super().__init__()
-        self.usage = usage
-        self.error = error
-
-
-class RegenDone(Message):
-    """Artifact regeneration completed."""
-
-    def __init__(self, files: list[dict[str, str]], usage: dict[str, Any] | None, error: str | None) -> None:
-        super().__init__()
-        self.files = files
-        self.usage = usage
-        self.error = error
 
 
 class ChatScreen(Screen):
@@ -179,13 +151,10 @@ class ChatScreen(Screen):
                             f"({usage.get('input_tokens', 0)} in / "
                             f"{usage.get('output_tokens', 0)} out)[/]"
                         )
-                    self.post_message(ChatDone(usage, None))
                 elif "error" in event:
                     log.write(f"\n[bold red]Error: {esc(event['error'])}[/]")
-                    self.post_message(ChatDone(None, event["error"]))
         except Exception as exc:
             log.write(f"\n[bold red]Connection error: {esc(str(exc))}[/]")
-            self.post_message(ChatDone(None, str(exc)))
         finally:
             stream.update("")
             stream.display = False
@@ -206,7 +175,5 @@ class ChatScreen(Screen):
                     f"({usage.get('input_tokens', 0)} in / "
                     f"{usage.get('output_tokens', 0)} out)[/]"
                 )
-            self.post_message(RegenDone(files, usage, None))
         except Exception as exc:
-            log.write(f"\n[bold red]Regeneration failed: {exc}[/]")
-            self.post_message(RegenDone([], None, str(exc)))
+            log.write(f"\n[bold red]Regeneration failed: {esc(str(exc))}[/]")

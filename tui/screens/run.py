@@ -9,22 +9,15 @@ from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.message import Message
 from textual.screen import Screen
-from textual.widgets import Button, Header, RichLog, TextArea
+from textual.widgets import Button, Checkbox, Header, RichLog, TextArea
 
+from tui import esc
 from tui.api import APIClient
 from tui.widgets.status_bar import StatusBar
 
 
 class RunStarted(Message):
     """Emitted when a run starts (no data)."""
-
-
-class RunEvent(Message):
-    """A new SSE event arrived from the pipeline."""
-
-    def __init__(self, event: dict[str, Any]) -> None:
-        super().__init__()
-        self.event = event
 
 
 class RunDone(Message):
@@ -111,11 +104,27 @@ class RunScreen(Screen):
         yield TextArea(id="run-spec-area", text="", placeholder="Enter your specification here...")
         with Horizontal(id="run-button-row"):
             yield Button("Run Pipeline", id="run-button", variant="primary")
+            yield Checkbox("Use RAG", id="use-rag-toggle", value=False)
         yield RichLog(id="run-output", highlight=True, max_lines=10000, markup=True)
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         spec_area = self.query_one("#run-spec-area", TextArea)
         spec_area.focus()
+        await self._refresh_status()
+
+    async def _refresh_status(self) -> None:
+        """Probe the API connection and quota state for the status bar."""
+        status_bar = self.query_one(StatusBar)
+        try:
+            await self._api_client.health()
+            status_bar.connected = True
+        except Exception:
+            status_bar.connected = False
+        try:
+            quota = await self._api_client.get_quota()
+            status_bar.update_from_quota(quota)
+        except Exception:
+            pass
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "run-button":
@@ -147,8 +156,8 @@ class RunScreen(Screen):
         api = self._api_client
 
         try:
-            async for event in api.run_stream(spec, use_rag=False):
-                self.post_message(RunEvent(event))
+            use_rag = self.query_one("#use-rag-toggle", Checkbox).value
+            async for event in api.run_stream(spec, use_rag=use_rag):
                 self._handle_event(output, event)
 
                 if event.get("type") == "result":
@@ -175,7 +184,7 @@ class RunScreen(Screen):
             code = event.get("code", "")
             lang = event.get("language", "")
             lines = code.split("\n")
-            output.write(f"\n[bold]Code generated[/] ({lang}, {len(lines)} lines)")
+            output.write(f"\n[bold]Code generated[/] ({esc(lang)}, {len(lines)} lines)")
             usage = event.get("usage", {})
             if usage:
                 output.write(f"  usage: {usage.get('input_tokens', 0)} in / {usage.get('output_tokens', 0)} out")
@@ -187,16 +196,16 @@ class RunScreen(Screen):
             issues = review.get("issues", [])
             status = "ok" if ok else "FAILED"
             color = "green" if ok else "red"
-            output.write(f"\n[bold {color}]Review: {name} ({status})[/]")
+            output.write(f"\n[bold {color}]Review: {esc(name)} ({status})[/]")
             if review.get("error"):
-                output.write(f"  error: {review['error']}")
+                output.write(f"  error: {esc(review['error'])}")
             for issue in issues:
                 sev = issue.get("severity", "?")
                 cat = issue.get("category", "?")
                 title = issue.get("title", "?")
-                output.write(f"  [{_sev_color(sev)}]{sev.upper():12s}[/] [{cat}]{title}[/]")
+                output.write(f"  [{_sev_color(sev)}]{esc(sev.upper()):12s}[/] [{esc(cat)}]{esc(title)}[/]")
             if review.get("overall"):
-                output.write(f"  overall: {review['overall']}")
+                output.write(f"  overall: {esc(review['overall'])}")
 
         elif etype == "consensus":
             consensus = event.get("consensus", {})
@@ -209,36 +218,36 @@ class RunScreen(Screen):
                 title = issue.get("title", "?")
                 bar = _score_bar(score)
                 output.write(
-                    f"  [{_sev_color(sev)}]{sev.upper():12s}[/] "
+                    f"  [{_sev_color(sev)}]{esc(sev.upper()):12s}[/] "
                     f"{bar} {score:.2f} "
-                    f"[dim]{', '.join(flagged)}[/] "
-                    f"{title}"
+                    f"[dim]{esc(', '.join(flagged))}[/] "
+                    f"{esc(title)}"
                 )
 
         elif etype == "result":
             result = event.get("result", {})
             verdict = result.get("verdict", "?")
             vcolor = {"APPROVE": "green", "APPROVE_WITH_CHANGES": "yellow", "REJECT": "red"}.get(verdict, "white")
-            output.write(f"\n[bold {vcolor}]Verdict: {verdict}[/]")
+            output.write(f"\n[bold {vcolor}]Verdict: {esc(verdict)}[/]")
             rationale = result.get("rationale", "")
             if rationale:
-                output.write(f"\n{rationale}")
+                output.write(f"\n{esc(rationale)}")
             final_code = result.get("final_code", "")
             if final_code:
                 flines = final_code.split("\n")
                 output.write(f"\nFinal code ({len(flines)} lines):")
                 # show first/last few lines
                 for line in flines[:8]:
-                    output.write(f"  {line}")
+                    output.write(f"  {esc(line)}")
                 if len(flines) > 10:
                     output.write(f"  ... ({len(flines) - 10} more lines)")
                     for line in flines[-2:]:
-                        output.write(f"  {line}")
+                        output.write(f"  {esc(line)}")
             files = result.get("files", [])
             if files:
                 output.write(f"\n[bold]Files: {len(files)}[/]")
                 for f in files:
-                    output.write(f"  {f.get('path', '?')}")
+                    output.write(f"  {esc(f.get('path', '?'))}")
             rag = result.get("rag_sources", [])
             if rag:
                 output.write(f"\nRAG sources: {len(rag)} chunks")
@@ -257,7 +266,7 @@ class RunScreen(Screen):
             )
 
         elif etype == "error":
-            output.write(f"\n[bold red]Pipeline error: {event.get('error', 'Unknown')}[/]")
+            output.write(f"\n[bold red]Pipeline error: {esc(event.get('error', 'Unknown'))}[/]")
 
     @property
     def session_id(self) -> str | None:
@@ -273,5 +282,5 @@ def _sev_color(sev: str) -> str:
 
 
 def _score_bar(score: float) -> str:
-    n = max(1, round(score * 10))
+    n = round(max(0.0, min(1.0, score)) * 10)
     return "█" * n + "░" * (10 - n)

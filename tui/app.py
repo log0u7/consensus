@@ -84,22 +84,13 @@ class TUIApp(App):
         self.current_session_id: str | None = None
         self.current_result: dict[str, Any] | None = None
 
+    async def on_unmount(self) -> None:
+        """Close the API client to avoid leaking the httpx connection pool."""
+        await self._api_client.close()
+
     async def on_mount(self) -> None:
         self.title = "Consensus"
         self.push_screen(RunScreen(api_client=self._api_client))
-        # attempt connection check
-        try:
-            await self._api_client.health()
-            self.query_one(StatusBar).connected = True
-        except Exception:
-            self.query_one(StatusBar).connected = False
-        # fetch initial quota state
-        try:
-            quota = await self._api_client.get_quota()
-            status_bar = self.query_one(StatusBar)
-            status_bar.update_from_quota(quota)
-        except Exception:
-            pass
 
     async def action_toggle_quota(self) -> None:
         """Toggle low-quota mode."""

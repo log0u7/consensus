@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from textual.app import ComposeResult
@@ -113,8 +114,22 @@ class ArtifactScreen(Screen):
             yield fmt_btn
             yield Button("Download Archive", id="download-button", variant="primary", classes="action-button")
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         self._populate_file_list()
+        await self._load_formats()
+
+    async def _load_formats(self) -> None:
+        """Populate the format cycle from the API, falling back to the default list."""
+        try:
+            formats = await self._api_client.archive_formats()
+            if formats:
+                self._formats = formats
+                if self._selected_format not in self._formats:
+                    self._selected_format = self._formats[0]
+                button = self.query_one("#format-cycle-button", Button)
+                button.label = f" {self._selected_format} "
+        except Exception:
+            pass
 
     def _populate_file_list(self) -> None:
         file_list = self.query_one("#file-list", ListView)
@@ -156,8 +171,10 @@ class ArtifactScreen(Screen):
                 root="project",
             )
             fname = f"project.{self._selected_format}"
+            dest = Path.cwd() / fname
+            dest.write_bytes(data)
             self.notify(
-                f"Archive downloaded: {fname} ({len(data)} bytes)",
+                f"Archive written: {dest} ({len(data)} bytes)",
                 severity="information",
                 timeout=5,
             )

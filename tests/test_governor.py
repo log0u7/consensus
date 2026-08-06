@@ -1,7 +1,7 @@
 """Tests for governor.py: rate-limit, retry, fallback chain."""
 
 import pytest
-from src import governor
+from src import governor, quota
 
 
 @pytest.fixture(autouse=True)
@@ -12,6 +12,14 @@ def clear_limiters():
     yield
     if governor._HAS_LIMITER:
         governor._LIMITERS.clear()
+
+
+@pytest.fixture(autouse=True)
+def reset_quota():
+    """Exhausting retries auto-enables low-quota; never leak that state."""
+    quota.set_low_quota(False)
+    yield
+    quota.set_low_quota(False)
 
 
 @pytest.mark.asyncio

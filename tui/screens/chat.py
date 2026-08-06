@@ -9,7 +9,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.message import Message
 from textual.screen import Screen
-from textual.widgets import Button, Header, Label, RichLog, TextArea
+from textual.widgets import Button, Header, Label, RichLog, Static, TextArea
 
 from tui.api import APIClient
 from tui.widgets.status_bar import StatusBar
@@ -68,6 +68,13 @@ class ChatScreen(Screen):
         margin: 0 1;
     }
 
+    #chat-stream {
+        display: none;
+        height: 3;
+        border: solid $accent;
+        margin: 0 1;
+    }
+
     #chat-input-row {
         height: 4;
         margin: 0 1 1 1;
@@ -121,6 +128,7 @@ class ChatScreen(Screen):
         yield StatusBar()
         yield Label(f"Session: {self._session_id[:16]}...", id="chat-session-label")
         yield RichLog(id="chat-log", highlight=True, max_lines=10000, markup=True)
+        yield Static("", id="chat-stream")
         with Horizontal(id="chat-input-row"):
             yield TextArea(id="chat-input", text="", placeholder="Type your message...")
             yield Button("Send", id="chat-send-button", variant="primary")
@@ -151,15 +159,19 @@ class ChatScreen(Screen):
         input_widget.focus()
 
         log.write("[dim]Lead is thinking...[/]")
+        stream = self.query_one("#chat-stream", Static)
         buffer = ""
+        stream.update("[bold]Lead:[/] ")
+        stream.display = True
         try:
             async for event in self._api_client.chat_stream(self._session_id, text):
                 if "delta" in event:
                     buffer += event["delta"]
-                    # rewrite the last line to show partial response
-                    log.write(f"\n[bold]Lead:[/] {buffer}", width=9999)
+                    stream.update(f"[bold]Lead:[/] {buffer}")
                 elif "done" in event:
                     usage = event.get("usage", {})
+                    if buffer:
+                        log.write(f"\n[bold]Lead:[/] {buffer}")
                     if usage:
                         log.write(
                             f"\n[dim]--- cost: ${usage.get('cost', 0):.4f} "
@@ -173,6 +185,9 @@ class ChatScreen(Screen):
         except Exception as exc:
             log.write(f"\n[bold red]Connection error: {exc}[/]")
             self.post_message(ChatDone(None, str(exc)))
+        finally:
+            stream.update("")
+            stream.display = False
 
     async def regen_artifacts(self) -> None:
         log = self.query_one("#chat-log", RichLog)

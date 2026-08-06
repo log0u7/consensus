@@ -216,6 +216,7 @@ async def api_chat_stream(req: ChatRequest):
 
     async def gen():
         parts: list[str] = []
+        reply_appended = False
         tok = llm.set_step("chat")
         try:
             with llm.usage_scope() as usages:
@@ -224,15 +225,21 @@ async def api_chat_stream(req: ChatRequest):
                     yield f"data: {json.dumps({'delta': delta})}\n\n"
             reply = "".join(parts)
             sess["history"].append({"role": "assistant", "content": reply})
+            reply_appended = True
             store.save(req.session_id, sess)
             usage = pipeline.summarize_usage(usages).model_dump()
             yield f"data: {json.dumps({'done': True, 'usage': usage})}\n\n"
+        except asyncio.CancelledError:
+            # Client went away: propagate after the finally block has cleaned up.
+            raise
         except Exception as exc:  # noqa: BLE001
-            # Roll back the unanswered user turn so a retry is coherent.
-            if sess["history"] and sess["history"][-1]["role"] == "user":
-                sess["history"].pop()
             yield f"data: {json.dumps({'error': f'{type(exc).__name__}: {exc}'})}\n\n"
         finally:
+            # Roll back the unanswered user turn so a retry is coherent. This
+            # also covers cancellation, which `except Exception` never sees.
+            if not reply_appended:
+                if sess["history"] and sess["history"][-1]["role"] == "user":
+                    sess["history"].pop()
             llm.reset_step(tok)
 
     return StreamingResponse(

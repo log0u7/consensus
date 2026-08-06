@@ -84,6 +84,10 @@ class TUIApp(App):
         self.current_session_id: str | None = None
         self.current_result: dict[str, Any] | None = None
 
+    async def on_unmount(self) -> None:
+        """Close the API client to avoid leaking the httpx connection pool."""
+        await self._api_client.close()
+
     async def on_mount(self) -> None:
         self.title = "Consensus"
         self.push_screen(RunScreen(api_client=self._api_client))

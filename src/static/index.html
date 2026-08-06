@@ -787,9 +787,14 @@ async function sendChat(){
       $("messages").scrollTop = $("messages").scrollHeight;
     }
   } catch (e){
-    // Fall back to the non-streaming endpoint once if streaming failed early.
-    try { await sendChatNonStream(txt, pending); }
-    catch (e2){ pending.textContent = "Error: " + (e2.message || e.message); }
+    // Fall back to the non-streaming endpoint only when nothing arrived yet;
+    // with a partial reply already shown, re-sending would duplicate the turn.
+    if (acc === ""){
+      try { await sendChatNonStream(txt, pending); }
+      catch (e2){ pending.textContent = "Error: " + (e2.message || e.message); }
+    } else {
+      pending.textContent = "Error: " + (e.message || "stream interrupted");
+    }
   } finally {
     $("sendBtn").disabled = false;
     $("messages").scrollTop = $("messages").scrollHeight;

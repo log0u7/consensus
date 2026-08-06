@@ -11,6 +11,7 @@ from textual.message import Message
 from textual.screen import Screen
 from textual.widgets import Button, Header, Label, RichLog, Static, TextArea
 
+from tui import esc
 from tui.api import APIClient
 from tui.widgets.status_bar import StatusBar
 
@@ -154,7 +155,7 @@ class ChatScreen(Screen):
             return
 
         log = self.query_one("#chat-log", RichLog)
-        log.write(f"\n[bold]You:[/] {text}")
+        log.write(f"\n[bold]You:[/] {esc(text)}")
         input_widget.text = ""
         input_widget.focus()
 
@@ -167,11 +168,11 @@ class ChatScreen(Screen):
             async for event in self._api_client.chat_stream(self._session_id, text):
                 if "delta" in event:
                     buffer += event["delta"]
-                    stream.update(f"[bold]Lead:[/] {buffer}")
+                    stream.update(f"[bold]Lead:[/] {esc(buffer)}")
                 elif "done" in event:
                     usage = event.get("usage", {})
                     if buffer:
-                        log.write(f"\n[bold]Lead:[/] {buffer}")
+                        log.write(f"\n[bold]Lead:[/] {esc(buffer)}")
                     if usage:
                         log.write(
                             f"\n[dim]--- cost: ${usage.get('cost', 0):.4f} "
@@ -180,10 +181,10 @@ class ChatScreen(Screen):
                         )
                     self.post_message(ChatDone(usage, None))
                 elif "error" in event:
-                    log.write(f"\n[bold red]Error: {event['error']}[/]")
+                    log.write(f"\n[bold red]Error: {esc(event['error'])}[/]")
                     self.post_message(ChatDone(None, event["error"]))
         except Exception as exc:
-            log.write(f"\n[bold red]Connection error: {exc}[/]")
+            log.write(f"\n[bold red]Connection error: {esc(str(exc))}[/]")
             self.post_message(ChatDone(None, str(exc)))
         finally:
             stream.update("")
@@ -198,7 +199,7 @@ class ChatScreen(Screen):
             usage = result.get("usage", {})
             log.write(f"[bold]Files regenerated: {len(files)} files[/]")
             for f in files:
-                log.write(f"  {f.get('path', '?')}")
+                log.write(f"  {esc(f.get('path', '?'))}")
             if usage:
                 log.write(
                     f"[dim]  cost: ${usage.get('cost', 0):.4f} "

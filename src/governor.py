@@ -29,6 +29,7 @@ log = logging.getLogger(__name__)
 
 try:
     from aiolimiter import AsyncLimiter
+
     _LIMITERS: dict[str, AsyncLimiter] = {}
 
     def _limiter(provider_name: str) -> AsyncLimiter:
@@ -49,6 +50,7 @@ except ImportError:
     class _FakeLimiter:
         async def __aenter__(self):
             return self
+
         async def __aexit__(self, *_):
             pass
 
@@ -59,6 +61,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Retry predicate + tenacity setup
 # ---------------------------------------------------------------------------
+
 
 def _is_retryable(exc: BaseException) -> bool:
     if isinstance(exc, httpx.HTTPStatusError):
@@ -73,6 +76,7 @@ try:
         stop_after_attempt,
         wait_exponential_jitter,
     )
+
     _HAS_TENACITY = True
 except ImportError:
     log.warning("tenacity not installed; retry logic falls back to built-in")
@@ -82,6 +86,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Core call with rate-limit + retry
 # ---------------------------------------------------------------------------
+
 
 async def _call_once(provider_name: str, make_call: Callable[[], Awaitable[str]]) -> str:
     """Acquire a rate-limit slot then execute make_call with tenacity retry."""
@@ -130,11 +135,14 @@ async def call(
         except Exception as exc:  # noqa: BLE001
             log.warning(
                 "governor: provider %r exhausted retries (%s: %s); trying next",
-                pname, type(exc).__name__, exc,
+                pname,
+                type(exc).__name__,
+                exc,
             )
             last_exc = exc  # type: ignore[assignment]
             if pname == provider_name:
                 from . import quota
+
                 if not quota.is_low_quota() and config.AUTO_LOW_QUOTA:
                     quota.set_low_quota(True)
                     log.warning("governor: auto-enabling low-quota mode")

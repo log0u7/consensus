@@ -131,6 +131,7 @@ class Artifact(BaseModel):
 
 class SandboxResult(BaseModel):
     """Execution result from the sandbox (optional, populated when sandbox=true)."""
+
     stdout: str = ""
     stderr: str = ""
     exit_code: int = 0

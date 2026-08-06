@@ -38,7 +38,7 @@ SANDBOX_ENGINE = os.environ.get("SANDBOX_ENGINE", "docker").lower()
 SANDBOX_IMAGE = os.environ.get("SANDBOX_IMAGE", "python:3.12-slim")
 
 # Default resource limits.
-DEFAULT_TIMEOUT = int(os.environ.get("SANDBOX_TIMEOUT", "30"))       # seconds
+DEFAULT_TIMEOUT = int(os.environ.get("SANDBOX_TIMEOUT", "30"))  # seconds
 DEFAULT_MEM_LIMIT = os.environ.get("SANDBOX_MEM_LIMIT", "256m")
 DEFAULT_CPU_QUOTA = int(os.environ.get("SANDBOX_CPU_QUOTA", "50000"))  # 50% of 1 CPU
 
@@ -56,7 +56,7 @@ class SandboxResult:
     stderr: str = ""
     exit_code: int = 0
     timed_out: bool = False
-    skipped: bool = False   # True when SANDBOX_ENGINE=none
+    skipped: bool = False  # True when SANDBOX_ENGINE=none
     engine: str = ""
 
     @property
@@ -94,6 +94,7 @@ class Sandbox(ABC):
 # DockerSandbox: the safe default
 # ---------------------------------------------------------------------------
 
+
 class DockerSandbox(Sandbox):
     """Execute code in a throwaway Docker container.
 
@@ -130,14 +131,22 @@ class DockerSandbox(Sandbox):
                 dest.write_text(f.content, encoding="utf-8")
 
             docker_cmd = [
-                "docker", "run", "--rm",
-                "--network", "none",
+                "docker",
+                "run",
+                "--rm",
+                "--network",
+                "none",
                 "--read-only",
-                "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
-                "--memory", lim.mem_limit,
-                "--cpu-quota", str(lim.cpu_quota),
-                "-v", f"{tmpdir}:/workspace:ro",
-                "-w", "/workspace",
+                "--tmpfs",
+                "/tmp:rw,noexec,nosuid,size=64m",
+                "--memory",
+                lim.mem_limit,
+                "--cpu-quota",
+                str(lim.cpu_quota),
+                "-v",
+                f"{tmpdir}:/workspace:ro",
+                "-w",
+                "/workspace",
                 self.image,
                 *shlex.split(cmd),
             ]
@@ -165,14 +174,13 @@ class DockerSandbox(Sandbox):
                     return SandboxResult(timed_out=True, exit_code=-1, engine="docker")
             except Exception as exc:  # noqa: BLE001
                 log.warning("DockerSandbox failed: %s", exc)
-                return SandboxResult(
-                    stderr=str(exc), exit_code=-1, engine="docker-error"
-                )
+                return SandboxResult(stderr=str(exc), exit_code=-1, engine="docker-error")
 
 
 # ---------------------------------------------------------------------------
 # SubprocessSandbox: NOT SAFE - local dev / trusted code only
 # ---------------------------------------------------------------------------
+
 
 class SubprocessSandbox(Sandbox):
     """Execute code in a local subprocess with a temporary working directory.
@@ -188,9 +196,7 @@ class SubprocessSandbox(Sandbox):
         limits: SandboxLimits | None = None,
     ) -> SandboxResult:
         lim = limits or SandboxLimits()
-        log.warning(
-            "SubprocessSandbox: NO isolation - use DockerSandbox for untrusted code"
-        )
+        log.warning("SubprocessSandbox: NO isolation - use DockerSandbox for untrusted code")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             for f in files:
@@ -221,14 +227,13 @@ class SubprocessSandbox(Sandbox):
                     return SandboxResult(timed_out=True, exit_code=-1, engine="subprocess")
             except Exception as exc:  # noqa: BLE001
                 log.warning("SubprocessSandbox failed: %s", exc)
-                return SandboxResult(
-                    stderr=str(exc), exit_code=-1, engine="subprocess-error"
-                )
+                return SandboxResult(stderr=str(exc), exit_code=-1, engine="subprocess-error")
 
 
 # ---------------------------------------------------------------------------
 # NoSandbox: no execution (SANDBOX_ENGINE=none)
 # ---------------------------------------------------------------------------
+
 
 class NoSandbox(Sandbox):
     async def run(
@@ -243,6 +248,7 @@ class NoSandbox(Sandbox):
 # ---------------------------------------------------------------------------
 # Factory + module-level instance
 # ---------------------------------------------------------------------------
+
 
 def _make(engine: str) -> Sandbox:
     if engine == "docker":

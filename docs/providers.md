@@ -32,8 +32,8 @@ a wide range of open-weight and frontier models.
 ### OpenRouter
 
 OpenRouter is reachable via the `zen` provider or by configuring a custom
-`openai`-compatible provider pointing at `https://openrouter.ai/api/v1`. The
-`/responses` path is used (not `/messages`).
+`openai`-compatible provider pointing at `https://openrouter.ai/api/v1`. It uses
+the OpenAI-compatible `POST /chat/completions` transport (not `/messages`).
 
 ## Transport details
 
@@ -74,11 +74,12 @@ The Anthropic streaming transport uses native SSE (`"stream": true`).
 
 `src/providers.py` tracks optional per-provider metadata:
 
-- `has_reasoning(provider)`: returns `True` for known reasoning models
-  (e.g. DeepSeek-R1, o-series). Used to set higher `max_tokens` budgets.
+- `has_reasoning(provider_name, model)`: returns `True` for known reasoning
+  models (e.g. DeepSeek-R1, o-series). Used to set higher `max_tokens` budgets.
 - `resolve_name(ref)`: splits `"provider/model"` into `(provider, model)` and
   validates the provider is registered.
-- `provider_caps(provider)`: returns the capability dict for a provider.
+- `caps(provider_name, model)`: returns the capability dict for a
+  provider/model pair (`reasoning`, `context_window`, `max_tokens`).
 
 ## Rate limits and retries
 

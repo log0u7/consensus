@@ -25,8 +25,8 @@ class Provider:
     base_url: str
     # transport: "openai-compatible" | "anthropic"
     transport: str
-    auth_header: str   # header name  ("Authorization" or "x-api-key")
-    auth_value: str    # header value (e.g. "Bearer sk-..." or raw key)
+    auth_header: str  # header name  ("Authorization" or "x-api-key")
+    auth_value: str  # header value (e.g. "Bearer sk-..." or raw key)
     verify_tls: "bool | str" = True  # True | False | "/path/to/ca.pem"
     extra_headers: dict = field(default_factory=dict)
 
@@ -35,9 +35,7 @@ def _tls(raw: str) -> "bool | str":
     """Parse a TLS verification value: path | true | false | __insecure__."""
     raw = raw.strip()
     if raw.lower() in ("false", "0", "no", "__insecure__"):
-        log.warning(
-            "TLS verification disabled (value=%r) - traffic is not verified.", raw
-        )
+        log.warning("TLS verification disabled (value=%r) - traffic is not verified.", raw)
         return False
     if raw.lower() in ("true", "1", "yes", ""):
         return True
@@ -55,6 +53,7 @@ def _apikey(key: str) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 # Build the provider registry from environment variables.
 # ---------------------------------------------------------------------------
+
 
 def _build_providers() -> dict[str, Provider]:
     """Build the active provider map from env.  Only providers whose key is
@@ -93,9 +92,7 @@ def _build_providers() -> dict[str, Provider]:
 
     # --- Anthropic (Messages API, native streaming) -------------------------
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    anthropic_url = os.environ.get(
-        "ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1"
-    ).rstrip("/")
+    anthropic_url = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1").rstrip("/")
     if anthropic_key:
         hdr, val = _apikey(anthropic_key)
         providers["anthropic"] = Provider(
@@ -195,13 +192,12 @@ RATE_LIMIT_MAX_RETRIES = int(os.environ.get("RATE_LIMIT_MAX_RETRIES", "4"))
 RATE_LIMIT_BASE_DELAY = float(os.environ.get("RATE_LIMIT_BASE_DELAY", "2"))
 RATE_LIMIT_MAX_DELAY = float(os.environ.get("RATE_LIMIT_MAX_DELAY", "60"))
 RATE_LIMIT_RETRY_STATUSES = {
-    int(s)
-    for s in os.environ.get("RATE_LIMIT_RETRY_STATUSES", "429,503").split(",")
-    if s.strip()
+    int(s) for s in os.environ.get("RATE_LIMIT_RETRY_STATUSES", "429,503").split(",") if s.strip()
 }
 # Provider RPM cap for aiolimiter (per provider name, env PROVIDER_RPM_<NAME>).
 # Zen free tier is generous; set to 0 to disable the limiter for a provider.
 _DEFAULT_RPM = int(os.environ.get("DEFAULT_RPM", "60"))
+
 
 def provider_rpm(name: str) -> int:
     return int(os.environ.get(f"RPM_{name.upper()}", str(_DEFAULT_RPM)))
@@ -221,15 +217,16 @@ ALLOWED_ORIGINS = [
 
 # Provider:model pairs.  Format: "provider/model-id"  e.g. "zen/qwen3-coder"
 # All three default to reasoner-class models on Zen.
-CODER_MODEL    = os.environ.get("CODER_MODEL",     "zen/deepseek-v3-0324")
+CODER_MODEL = os.environ.get("CODER_MODEL", "zen/deepseek-v3-0324")
 CONSENSUS_MODEL = os.environ.get("CONSENSUS_MODEL", "zen/deepseek-r1-0528")
-LEAD_MODEL     = os.environ.get("LEAD_MODEL",      "zen/deepseek-r1-0528")
+LEAD_MODEL = os.environ.get("LEAD_MODEL", "zen/deepseek-r1-0528")
 
-CODER_MAX_TOKENS    = int(os.environ.get("CODER_MAX_TOKENS",    "8000"))
-REVIEW_MAX_TOKENS   = int(os.environ.get("REVIEW_MAX_TOKENS",   "8000"))
+CODER_MAX_TOKENS = int(os.environ.get("CODER_MAX_TOKENS", "8000"))
+REVIEW_MAX_TOKENS = int(os.environ.get("REVIEW_MAX_TOKENS", "8000"))
 CONSENSUS_MAX_TOKENS = int(os.environ.get("CONSENSUS_MAX_TOKENS", "8000"))
-LEAD_MAX_TOKENS     = int(os.environ.get("LEAD_MAX_TOKENS",     "16000"))
-CHAT_MAX_TOKENS     = int(os.environ.get("CHAT_MAX_TOKENS",     "4000"))
+LEAD_MAX_TOKENS = int(os.environ.get("LEAD_MAX_TOKENS", "16000"))
+CHAT_MAX_TOKENS = int(os.environ.get("CHAT_MAX_TOKENS", "4000"))
+
 
 # Per-role provider fallback chain: comma-separated provider names tried in
 # order when the primary provider exhausts its retries.
@@ -237,13 +234,14 @@ CHAT_MAX_TOKENS     = int(os.environ.get("CHAT_MAX_TOKENS",     "4000"))
 def _parse_fallback(raw: str) -> list[str]:
     return [p.strip() for p in raw.split(",") if p.strip()] if raw.strip() else []
 
-CODER_FALLBACK     = _parse_fallback(os.environ.get("CODER_FALLBACK",     ""))
-REVIEWER_FALLBACK  = _parse_fallback(os.environ.get("REVIEWER_FALLBACK",  ""))
+
+CODER_FALLBACK = _parse_fallback(os.environ.get("CODER_FALLBACK", ""))
+REVIEWER_FALLBACK = _parse_fallback(os.environ.get("REVIEWER_FALLBACK", ""))
 CONSENSUS_FALLBACK = _parse_fallback(os.environ.get("CONSENSUS_FALLBACK", ""))
-LEAD_FALLBACK      = _parse_fallback(os.environ.get("LEAD_FALLBACK",      ""))
+LEAD_FALLBACK = _parse_fallback(os.environ.get("LEAD_FALLBACK", ""))
 
 # Low-quota degraded profile (Lead is never downgraded)
-LOW_QUOTA_MODEL      = os.environ.get("LOW_QUOTA_MODEL",      "zen/deepseek-v3-0324")
+LOW_QUOTA_MODEL = os.environ.get("LOW_QUOTA_MODEL", "zen/deepseek-v3-0324")
 LOW_QUOTA_PANEL_SIZE = int(os.environ.get("LOW_QUOTA_PANEL_SIZE", "2"))
 
 # ---------------------------------------------------------------------------
@@ -257,8 +255,8 @@ _VALID_TRANSPORTS = set(("zen", "openai", "anthropic", "local"))
 
 _DEFAULT_PANEL = [
     {"name": "deepseek-coder", "provider": "zen", "model": "deepseek-v3-0324"},
-    {"name": "qwen3-coder",    "provider": "zen", "model": "qwen3-coder"},
-    {"name": "mimo-vl",        "provider": "zen", "model": "mimo-vl-7b-rl"},
+    {"name": "qwen3-coder", "provider": "zen", "model": "qwen3-coder"},
+    {"name": "mimo-vl", "provider": "zen", "model": "mimo-vl-7b-rl"},
 ]
 
 
@@ -283,15 +281,14 @@ def _parse_panel(raw: str) -> list[dict]:
             continue
         name, provider_model = parts[0], parts[1]
         if "/" not in provider_model:
-            log.warning(
-                "REVIEW_PANEL: entry %r missing 'provider/model' format, skipping", entry
-            )
+            log.warning("REVIEW_PANEL: entry %r missing 'provider/model' format, skipping", entry)
             continue
         provider, model = provider_model.split("/", 1)
         if provider not in PROVIDERS:
             log.warning(
                 "REVIEW_PANEL: provider %r not configured (entry %r), skipping",
-                provider, entry,
+                provider,
+                entry,
             )
             continue
         member: dict = {"name": name, "provider": provider, "model": model}
@@ -299,9 +296,7 @@ def _parse_panel(raw: str) -> list[dict]:
             try:
                 member["max_tokens"] = int(parts[2])
             except ValueError:
-                log.warning(
-                    "REVIEW_PANEL: ignoring non-integer max_tokens in %r", entry
-                )
+                log.warning("REVIEW_PANEL: ignoring non-integer max_tokens in %r", entry)
         out.append(member)
 
     if not out:
@@ -314,20 +309,19 @@ PANEL = _parse_panel(os.environ.get("REVIEW_PANEL", ""))
 
 _low_panel_raw = os.environ.get("LOW_QUOTA_PANEL", "")
 LOW_QUOTA_PANEL = (
-    _parse_panel(_low_panel_raw) if _low_panel_raw.strip()
-    else PANEL[:LOW_QUOTA_PANEL_SIZE]
+    _parse_panel(_low_panel_raw) if _low_panel_raw.strip() else PANEL[:LOW_QUOTA_PANEL_SIZE]
 )
 
 # ---------------------------------------------------------------------------
 # RAG
 # ---------------------------------------------------------------------------
 
-EMBED_MODEL  = os.environ.get("EMBED_MODEL",  "text-embedding-3-large")
+EMBED_MODEL = os.environ.get("EMBED_MODEL", "text-embedding-3-large")
 EMBED_PROVIDER = os.environ.get("EMBED_PROVIDER", "zen")
-EMBED_DIM    = int(os.environ.get("EMBED_DIM",    "3072"))
+EMBED_DIM = int(os.environ.get("EMBED_DIM", "3072"))
 RAG_MIN_SCORE = float(os.environ.get("RAG_MIN_SCORE", "0.2"))
-RAG_TOP_K    = int(os.environ.get("RAG_TOP_K",    "3"))
-RAG_BACKEND  = os.environ.get("RAG_BACKEND", "pgvector")  # "pgvector" | "sqlite"
+RAG_TOP_K = int(os.environ.get("RAG_TOP_K", "3"))
+RAG_BACKEND = os.environ.get("RAG_BACKEND", "pgvector")  # "pgvector" | "sqlite"
 
 PG_DSN = os.environ.get("PG_DSN", "")
 SQLITE_VEC_PATH = os.environ.get("SQLITE_VEC_PATH", "rag.db")

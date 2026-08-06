@@ -50,10 +50,15 @@ async def test_consensus_single_reviewer_score_is_one(monkeypatch):
 
     async def fake_complete_json(make_call, retries=2):
         return {
-            "issues": [{
-                "title": "bug", "severity": "high", "category": "correctness",
-                "description": "x", "flagged_by": ["solo"],
-            }],
+            "issues": [
+                {
+                    "title": "bug",
+                    "severity": "high",
+                    "category": "correctness",
+                    "description": "x",
+                    "flagged_by": ["solo"],
+                }
+            ],
             "summary": "one reviewer",
         }
 
@@ -72,12 +77,27 @@ async def test_consensus_equal_score_sorted_by_severity(monkeypatch):
     async def fake_complete_json(make_call, retries=2):
         return {
             "issues": [
-                {"title": "low-issue",    "severity": "low",      "category": "style",
-                 "description": "d", "flagged_by": ["a", "b"]},
-                {"title": "critical-issue","severity": "critical", "category": "security",
-                 "description": "d", "flagged_by": ["a", "b"]},
-                {"title": "medium-issue", "severity": "medium",   "category": "correctness",
-                 "description": "d", "flagged_by": ["a", "b"]},
+                {
+                    "title": "low-issue",
+                    "severity": "low",
+                    "category": "style",
+                    "description": "d",
+                    "flagged_by": ["a", "b"],
+                },
+                {
+                    "title": "critical-issue",
+                    "severity": "critical",
+                    "category": "security",
+                    "description": "d",
+                    "flagged_by": ["a", "b"],
+                },
+                {
+                    "title": "medium-issue",
+                    "severity": "medium",
+                    "category": "correctness",
+                    "description": "d",
+                    "flagged_by": ["a", "b"],
+                },
             ],
             "summary": "ok",
         }
@@ -92,9 +112,9 @@ async def test_consensus_equal_score_sorted_by_severity(monkeypatch):
 async def test_consensus_panel_names_reflect_ok_reviewers(monkeypatch):
     """report.panel must contain only the reviewers that answered (ok=True)."""
     reviews = [
-        Review(reviewer="ok1",  ok=True),
+        Review(reviewer="ok1", ok=True),
         Review(reviewer="bad1", ok=False, error="timeout"),
-        Review(reviewer="ok2",  ok=True),
+        Review(reviewer="ok2", ok=True),
     ]
 
     async def fake_complete_json(make_call, retries=2):

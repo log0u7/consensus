@@ -23,6 +23,7 @@ _PYTHON = sys.executable
 # SandboxResult helpers
 # ---------------------------------------------------------------------------
 
+
 def test_sandbox_result_success():
     r = SandboxResult(exit_code=0)
     assert r.success is True
@@ -71,6 +72,7 @@ def test_as_context_timeout():
 # NoSandbox
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_no_sandbox_skips():
     s = NoSandbox()
@@ -82,6 +84,7 @@ async def test_no_sandbox_skips():
 # ---------------------------------------------------------------------------
 # SubprocessSandbox (offline, no Docker needed)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_subprocess_sandbox_runs_python():
@@ -128,7 +131,8 @@ def _docker_image_available(image: str) -> bool:
     try:
         r = subprocess.run(
             ["docker", "image", "inspect", image],
-            capture_output=True, timeout=5,
+            capture_output=True,
+            timeout=5,
         )
         return r.returncode == 0
     except Exception:
@@ -156,6 +160,7 @@ async def test_docker_sandbox_runs_python():
 async def test_docker_sandbox_no_network():
     """The container must not reach the internet."""
     import json
+
     s = DockerSandbox()
     code = (
         "import urllib.request, json\n"

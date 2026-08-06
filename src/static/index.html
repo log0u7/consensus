@@ -701,8 +701,8 @@ async function runConsensus(){
       if (evt.usage) renderCost(evt.usage);   // live cost from the first event on
       if (evt.type === "code"){
         codeLang = evt.language || "";
-        draftCode = evt.code; finalCode = evt.code;
-        setCodeTab("final");
+        draftCode = evt.code;
+        setCodeTab("draft");
         $("panel").innerHTML = '<div class="empty">Panel reviewing in parallel...</div>';
         $("status").textContent = "Panel reviewing...";
       } else if (evt.type === "review"){

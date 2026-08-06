@@ -32,6 +32,8 @@ jobs:
         run: pip install -q -r requirements-dev.txt
       - name: Run ruff
         run: ruff check src tests tui
+      - name: Check formatting
+        run: ruff format --check src tests tui
 
   typecheck:
     name: Type check (mypy)
@@ -50,7 +52,7 @@ jobs:
       - name: Install dev deps
         run: pip install -q -r requirements-dev.txt
       - name: Run mypy
-        run: mypy src
+        run: mypy src tui
 
   test:
     name: Tests (Python ${{ matrix.python-version }})
@@ -75,4 +77,34 @@ jobs:
       - name: Run pytest
         env:
           ZEN_API_KEY: dummy
-        run: pytest
+        run: pytest --cov=src --cov-report=xml --cov-report=term-missing
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.python-version }}
+          path: coverage.xml
+
+  sandbox:
+    name: Docker sandbox tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dev deps
+        run: pip install -q -r requirements-dev.txt
+      - name: Pull sandbox image
+        run: docker pull python:3.12-slim
+      - name: Run sandbox tests
+        env:
+          ZEN_API_KEY: dummy
+        run: pytest tests/test_sandbox.py
+
+  docker-build:
+    name: Build Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t consensus-ci -f Dockerfile .

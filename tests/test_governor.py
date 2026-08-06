@@ -66,6 +66,7 @@ async def test_call_raises_when_all_exhausted():
 @pytest.mark.asyncio
 async def test_call_no_fallback_raises():
     """With no fallback, the original exception propagates."""
+
     async def fail():
         raise ValueError("boom")
 

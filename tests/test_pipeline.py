@@ -17,6 +17,7 @@ from src.models import ConsensusReport, CostSummary, PipelineResult, Usage  # no
 # Fixtures / shared fakes
 # ---------------------------------------------------------------------------
 
+
 def _patch_agents(monkeypatch):
     """Monkeypatch all four agent functions with fast fakes."""
 
@@ -25,6 +26,7 @@ def _patch_agents(monkeypatch):
 
     async def fake_review(member, code):
         from src.models import Review
+
         return Review(reviewer=member["name"], ok=True, issues=[])
 
     async def fake_consensus(reviews):
@@ -33,15 +35,16 @@ def _patch_agents(monkeypatch):
     async def fake_verdict(spec, code, cj):
         return {"verdict": "APPROVE", "rationale": "fine", "final_code": code, "files": []}
 
-    monkeypatch.setattr(agents, "write_code",      fake_write_code)
-    monkeypatch.setattr(agents, "review_code",     fake_review)
+    monkeypatch.setattr(agents, "write_code", fake_write_code)
+    monkeypatch.setattr(agents, "review_code", fake_review)
     monkeypatch.setattr(agents, "build_consensus", fake_consensus)
-    monkeypatch.setattr(agents, "lead_verdict",    fake_verdict)
+    monkeypatch.setattr(agents, "lead_verdict", fake_verdict)
 
 
 # ---------------------------------------------------------------------------
 # run_streaming
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_run_streaming_emits_code_event(monkeypatch):
@@ -106,6 +109,7 @@ async def test_run_streaming_no_rag_by_default(monkeypatch):
 
     # Patch the rag module that pipeline imports lazily
     import src.rag as rag_mod
+
     monkeypatch.setattr(rag_mod, "search", fake_rag_search)
 
     [e async for e in pipeline.run_streaming("spec", use_rag=False)]
@@ -115,6 +119,7 @@ async def test_run_streaming_no_rag_by_default(monkeypatch):
 # ---------------------------------------------------------------------------
 # run (non-streaming wrapper)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_run_returns_pipeline_result(monkeypatch):
@@ -145,6 +150,7 @@ async def test_run_result_has_consensus(monkeypatch):
 # summarize_usage helper
 # ---------------------------------------------------------------------------
 
+
 def test_summarize_usage_empty():
     cs = pipeline.summarize_usage([])
     assert cs.calls == 0
@@ -158,7 +164,7 @@ def test_summarize_usage_aggregates_tokens():
     usages = [
         Usage(input_tokens=100, output_tokens=50, cost=0.001),
         Usage(input_tokens=200, output_tokens=80, cost=0.002),
-        Usage(input_tokens=50,  output_tokens=20),  # no cost
+        Usage(input_tokens=50, output_tokens=20),  # no cost
     ]
     cs = pipeline.summarize_usage(usages)
     assert cs.calls == 3
@@ -181,6 +187,7 @@ def test_summarize_usage_no_cost_known():
 # ---------------------------------------------------------------------------
 # lead_system_for
 # ---------------------------------------------------------------------------
+
 
 def test_lead_system_for_includes_spec_and_code():
     result = PipelineResult(

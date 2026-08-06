@@ -88,7 +88,9 @@ class ArtifactScreen(Screen):
     }
     """
 
-    def __init__(self, api_client: APIClient, files: list[dict[str, str]], session_id: str, **kwargs: Any) -> None:
+    def __init__(
+        self, api_client: APIClient, files: list[dict[str, str]], session_id: str, **kwargs: Any
+    ) -> None:
         super().__init__(**kwargs)
         self._api_client = api_client
         self._files = files
@@ -99,7 +101,10 @@ class ArtifactScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield StatusBar()
-        yield Label(f"Session: {self._session_id[:16]}... | Files: {len(self._files)}", id="artifact-session-label")
+        yield Label(
+            f"Session: {self._session_id[:16]}... | Files: {len(self._files)}",
+            id="artifact-session-label",
+        )
         with Horizontal(id="artifact-layout"):
             with Vertical(id="file-list-panel"):
                 yield Label("Files", id="file-list-title")
@@ -110,10 +115,14 @@ class ArtifactScreen(Screen):
         with Horizontal(id="artifact-actions"):
             yield Label("Format:", id="format-label")
             # Format selector as simple cycle through formats
-            fmt_btn = Button(f" {self._selected_format} ", id="format-cycle-button", variant="default")
+            fmt_btn = Button(
+                f" {self._selected_format} ", id="format-cycle-button", variant="default"
+            )
             fmt_btn.classes = "action-button"
             yield fmt_btn
-            yield Button("Download Archive", id="download-button", variant="primary", classes="action-button")
+            yield Button(
+                "Download Archive", id="download-button", variant="primary", classes="action-button"
+            )
 
     async def on_mount(self) -> None:
         self._populate_file_list()

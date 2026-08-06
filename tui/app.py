@@ -116,8 +116,7 @@ class TUIApp(App):
             self.current_session_id = message.session_id
             self.current_result = message.result
             self.notify(
-                f"Pipeline complete - session {message.session_id[:8]}... "
-                "Press Ctrl+C to chat",
+                f"Pipeline complete - session {message.session_id[:8]}... Press Ctrl+C to chat",
                 severity="information",
                 timeout=8,
             )
@@ -130,7 +129,9 @@ class TUIApp(App):
     async def action_open_chat(self) -> None:
         """Open the chat screen for the current session."""
         if not self.current_session_id:
-            self.notify("No session available - run a pipeline first", severity="warning", timeout=4)
+            self.notify(
+                "No session available - run a pipeline first", severity="warning", timeout=4
+            )
             return
         if isinstance(self.screen, ChatScreen):
             return

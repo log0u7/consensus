@@ -23,7 +23,9 @@ class RunStarted(Message):
 class RunDone(Message):
     """Pipeline completed (result or error)."""
 
-    def __init__(self, session_id: str | None, result: dict[str, Any] | None, error: str | None) -> None:
+    def __init__(
+        self, session_id: str | None, result: dict[str, Any] | None, error: str | None
+    ) -> None:
         super().__init__()
         self.session_id = session_id
         self.result = result
@@ -187,7 +189,9 @@ class RunScreen(Screen):
             output.write(f"\n[bold]Code generated[/] ({esc(lang)}, {len(lines)} lines)")
             usage = event.get("usage", {})
             if usage:
-                output.write(f"  usage: {usage.get('input_tokens', 0)} in / {usage.get('output_tokens', 0)} out")
+                output.write(
+                    f"  usage: {usage.get('input_tokens', 0)} in / {usage.get('output_tokens', 0)} out"
+                )
 
         elif etype == "review":
             review = event.get("review", {})
@@ -203,7 +207,9 @@ class RunScreen(Screen):
                 sev = issue.get("severity", "?")
                 cat = issue.get("category", "?")
                 title = issue.get("title", "?")
-                output.write(f"  [{_sev_color(sev)}]{esc(sev.upper()):12s}[/] [{esc(cat)}]{esc(title)}[/]")
+                output.write(
+                    f"  [{_sev_color(sev)}]{esc(sev.upper()):12s}[/] [{esc(cat)}]{esc(title)}[/]"
+                )
             if review.get("overall"):
                 output.write(f"  overall: {esc(review['overall'])}")
 
@@ -227,7 +233,9 @@ class RunScreen(Screen):
         elif etype == "result":
             result = event.get("result", {})
             verdict = result.get("verdict", "?")
-            vcolor = {"APPROVE": "green", "APPROVE_WITH_CHANGES": "yellow", "REJECT": "red"}.get(verdict, "white")
+            vcolor = {"APPROVE": "green", "APPROVE_WITH_CHANGES": "yellow", "REJECT": "red"}.get(
+                verdict, "white"
+            )
             output.write(f"\n[bold {vcolor}]Verdict: {esc(verdict)}[/]")
             rationale = result.get("rationale", "")
             if rationale:
@@ -278,7 +286,9 @@ class RunScreen(Screen):
 
 
 def _sev_color(sev: str) -> str:
-    return {"critical": "red", "high": "orange", "medium": "yellow", "low": "green"}.get(sev.lower(), "white")
+    return {"critical": "red", "high": "orange", "medium": "yellow", "low": "green"}.get(
+        sev.lower(), "white"
+    )
 
 
 def _score_bar(score: float) -> str:

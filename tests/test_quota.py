@@ -20,6 +20,7 @@ def _reset_quota():
 # Toggle
 # ---------------------------------------------------------------------------
 
+
 def test_default_is_normal():
     assert quota.is_low_quota() is False
 
@@ -43,6 +44,7 @@ def test_set_low_quota_returns_new_value():
 # ---------------------------------------------------------------------------
 # Degraded profile: coder and consensus downgraded, Lead protected
 # ---------------------------------------------------------------------------
+
 
 def test_coder_model_normal():
     prov, mod = quota.coder_model()
@@ -89,6 +91,7 @@ def test_lead_model_never_downgraded():
 # Panel shrinks in low-quota mode
 # ---------------------------------------------------------------------------
 
+
 def test_panel_normal_is_full():
     assert quota.panel() is config.PANEL
 
@@ -106,6 +109,7 @@ def test_panel_low_quota_uses_low_quota_panel():
 # ---------------------------------------------------------------------------
 # profile() helper
 # ---------------------------------------------------------------------------
+
 
 def test_profile_normal():
     p = quota.profile()

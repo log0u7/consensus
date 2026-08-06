@@ -30,15 +30,23 @@ log = logging.getLogger(__name__)
 
 _CAPS: dict[str, dict] = {
     # Zen - reasoning
-    "zen/deepseek-r1-0528":         {"reasoning": True,  "context_window": 128_000, "max_tokens": 32_000},
-    "zen/nemotron-ultra":            {"reasoning": True,  "context_window": 128_000, "max_tokens": 32_000},
-    "zen/mimo-vl-7b-rl":             {"reasoning": True,  "context_window": 32_768,  "max_tokens": 8_000},
+    "zen/deepseek-r1-0528": {"reasoning": True, "context_window": 128_000, "max_tokens": 32_000},
+    "zen/nemotron-ultra": {"reasoning": True, "context_window": 128_000, "max_tokens": 32_000},
+    "zen/mimo-vl-7b-rl": {"reasoning": True, "context_window": 32_768, "max_tokens": 8_000},
     # Zen - fast
-    "zen/deepseek-v3-0324":          {"reasoning": False, "context_window": 128_000, "max_tokens": 16_000},
-    "zen/qwen3-coder":               {"reasoning": False, "context_window": 128_000, "max_tokens": 16_000},
+    "zen/deepseek-v3-0324": {"reasoning": False, "context_window": 128_000, "max_tokens": 16_000},
+    "zen/qwen3-coder": {"reasoning": False, "context_window": 128_000, "max_tokens": 16_000},
     # Anthropic
-    "anthropic/claude-opus-latest":  {"reasoning": False, "context_window": 200_000, "max_tokens": 32_000},
-    "anthropic/claude-sonnet-latest":{"reasoning": False, "context_window": 200_000, "max_tokens": 16_000},
+    "anthropic/claude-opus-latest": {
+        "reasoning": False,
+        "context_window": 200_000,
+        "max_tokens": 32_000,
+    },
+    "anthropic/claude-sonnet-latest": {
+        "reasoning": False,
+        "context_window": 200_000,
+        "max_tokens": 16_000,
+    },
 }
 
 _DEFAULT_CAPS: dict = {"reasoning": False, "context_window": 128_000, "max_tokens": 16_000}
@@ -57,6 +65,7 @@ def has_reasoning(provider_name: str, model: str) -> bool:
 # ---------------------------------------------------------------------------
 # Resolution
 # ---------------------------------------------------------------------------
+
 
 def resolve(ref: str) -> tuple[Provider, str]:
     """Resolve a 'provider/model' reference to (Provider, model_id).

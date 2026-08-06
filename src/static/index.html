@@ -393,7 +393,7 @@ function renderPanel(reviews){
         const m = document.createElement("div");
         m.className = "mini";
         m.innerHTML =
-          `<div class="top"><span class="${sevClass(i.severity)}">${i.severity}</span> `
+          `<div class="top"><span class="${sevClass(i.severity)}">${escapeHtml(i.severity)}</span> `
           + `<span class="badge cat">${escapeHtml(i.category)}</span> `
           + `<span class="title">${escapeHtml(i.title)}</span></div>`
           + (i.description ? `<div class="desc">${escapeHtml(i.description)}</div>` : "")
@@ -421,7 +421,7 @@ function renderConsensus(c){
     div.className = "issue";
     const top = document.createElement("div"); top.className = "top";
     top.innerHTML = `<span class="score">${pct}</span>`
-      + `<span class="${sevClass(it.severity)}">${it.severity}</span>`
+      + `<span class="${sevClass(it.severity)}">${escapeHtml(it.severity)}</span>`
       + `<span class="badge cat">${escapeHtml(it.category)}</span>`
       + `<span class="title">${escapeHtml(it.title)}</span>`;
     div.appendChild(top);

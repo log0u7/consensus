@@ -9,6 +9,7 @@ from src.roles import Role
 # skills.py
 # ---------------------------------------------------------------------------
 
+
 def test_list_available_includes_bundled():
     available = skills_mod.list_available()
     assert "coding" in available
@@ -47,6 +48,7 @@ def test_load_skills_empty_list():
 # ---------------------------------------------------------------------------
 # context.py
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_build_injects_skills():
@@ -106,8 +108,10 @@ def test_tokens_estimate():
 # mcp_client.py: import error when sdk is missing
 # ---------------------------------------------------------------------------
 
+
 def test_mcp_client_raises_on_missing_sdk(monkeypatch):
     import builtins
+
     real_import = builtins.__import__
 
     def mock_import(name, *args, **kwargs):
@@ -133,8 +137,10 @@ def test_mcp_client_raises_on_missing_sdk(monkeypatch):
 # New teams: SRE and pentest YAML load correctly
 # ---------------------------------------------------------------------------
 
+
 def test_load_sre_team():
     from src import roles as roles_mod
+
     team = roles_mod.load("sre")
     assert team.topology == "pipeline"
     assert "planner" in team.roles
@@ -145,6 +151,7 @@ def test_load_sre_team():
 
 def test_load_pentest_team():
     from src import roles as roles_mod
+
     team = roles_mod.load("pentest")
     assert team.topology == "loop"
     assert team.sandbox is True

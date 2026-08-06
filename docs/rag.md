@@ -4,6 +4,10 @@ RAG is **opt-in and off by default**. When enabled, relevant chunks from an
 indexed corpus are injected into the coder's context before the pipeline runs.
 The panel and lead never see raw RAG chunks directly - only the coder does.
 
+The per-role `rag_ns` field declared in team YAMLs (`docs/teams.md`) is **not
+wired into the topologies yet**: the active RAG path is the global `use_rag`
+flag below. Namespaces are reserved for the upcoming retrieval executor.
+
 ## Why off by default
 
 - Enabling RAG without an indexed corpus does nothing useful: `search()` returns

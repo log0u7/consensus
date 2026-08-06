@@ -16,7 +16,9 @@ class APIClient:
     """
 
     def __init__(self, base_url: str = "http://localhost:8800", timeout: float = 300) -> None:
-        self._client = httpx.AsyncClient(base_url=base_url.rstrip("/"), timeout=httpx.Timeout(timeout))
+        self._client = httpx.AsyncClient(
+            base_url=base_url.rstrip("/"), timeout=httpx.Timeout(timeout)
+        )
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -41,7 +43,9 @@ class APIClient:
 
     # -- run ----------------------------------------------------------------------
 
-    async def run_stream(self, spec: str, use_rag: bool = False) -> AsyncGenerator[dict[str, Any], None]:
+    async def run_stream(
+        self, spec: str, use_rag: bool = False
+    ) -> AsyncGenerator[dict[str, Any], None]:
         async with self._client.stream(
             "POST",
             "/api/run/stream",
@@ -88,7 +92,9 @@ class APIClient:
                             yield json.loads(line)
 
     async def chat(self, session_id: str, message: str) -> dict[str, Any]:
-        resp = await self._client.post("/api/chat", json={"session_id": session_id, "message": message})
+        resp = await self._client.post(
+            "/api/chat", json={"session_id": session_id, "message": message}
+        )
         resp.raise_for_status()
         return resp.json()
 

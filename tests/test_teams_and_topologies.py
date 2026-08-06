@@ -12,6 +12,7 @@ from src.roles import Role, Team
 # roles.py unit tests
 # ---------------------------------------------------------------------------
 
+
 def test_load_consensus_team():
     team = roles_mod.load("consensus")
     assert team.name == "consensus"
@@ -61,6 +62,7 @@ def test_reviewer_members_parsed():
 # topology dispatch + parity test
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_consensus_topology_emits_correct_event_types(monkeypatch):
     """The consensus topology must emit code, review(s), consensus, result."""
@@ -71,10 +73,12 @@ async def test_consensus_topology_emits_correct_event_types(monkeypatch):
 
     async def fake_review(member, code):
         from src.models import Review
+
         return Review(reviewer=member["name"], ok=True, issues=[])
 
     async def fake_consensus(reviews):
         from src.models import ConsensusReport
+
         return ConsensusReport(panel=[r.reviewer for r in reviews], summary="ok")
 
     async def fake_verdict(spec, code, cj):
@@ -106,10 +110,12 @@ async def test_pipeline_streaming_uses_team(monkeypatch):
 
     async def fake_review(member, code):
         from src.models import Review
+
         return Review(reviewer=member["name"], ok=True)
 
     async def fake_consensus(reviews):
         from src.models import ConsensusReport
+
         return ConsensusReport(panel=[r.reviewer for r in reviews], summary="ok")
 
     async def fake_verdict(spec, code, cj):
@@ -127,9 +133,9 @@ async def test_pipeline_streaming_uses_team(monkeypatch):
 @pytest.mark.asyncio
 async def test_unknown_topology_raises():
     from src import topologies
+
     team = Team(
-        name="bad", topology="nonexistent",
-        roles={"coder": Role(name="coder", model="zen/x")}
+        name="bad", topology="nonexistent", roles={"coder": Role(name="coder", model="zen/x")}
     )
     with pytest.raises(ValueError, match="Unknown topology"):
         await topologies.run(team, "spec")
@@ -138,6 +144,7 @@ async def test_unknown_topology_raises():
 # ---------------------------------------------------------------------------
 # Topology: pipeline  (sequential planner -> executor -> verifier)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_pipeline_topology_emits_step_per_role(monkeypatch):
@@ -155,7 +162,7 @@ async def test_pipeline_topology_emits_step_per_role(monkeypatch):
     events = [e async for e in topo]
 
     step_events = [e for e in events if e["type"] == "step"]
-    role_names  = [e["role"] for e in step_events]
+    role_names = [e["role"] for e in step_events]
     assert role_names == list(team.roles.keys())
     assert events[-1]["type"] == "result"
 
@@ -208,6 +215,7 @@ async def test_pipeline_topology_accumulates_context(monkeypatch):
 # Topology: loop  (iterative recon -> exploit -> report)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_loop_topology_respects_max_iterations(monkeypatch):
     """When no role emits '[DONE]', the loop must stop at max_iterations."""
@@ -221,7 +229,12 @@ async def test_loop_topology_respects_max_iterations(monkeypatch):
     team = roles_mod.load("pentest")
     assert team.topology == "loop"
     max_iter = 2
-    events = [e async for e in topologies.run_loop(team, "scan target", run_id="l1", max_iterations=max_iter)]
+    events = [
+        e
+        async for e in topologies.run_loop(
+            team, "scan target", run_id="l1", max_iterations=max_iter
+        )
+    ]
 
     iter_events = [e for e in events if e["type"] == "iteration"]
     seen_iterations = sorted({e["i"] for e in iter_events})

@@ -117,7 +117,7 @@ phases to keep the SSE connection alive through proxies.
 
 A session is created at the end of each successful run and stores the
 `PipelineResult`, the lead system prompt, and the conversation history. Sessions
-have a TTL (default: 4 hours) and an LRU cap. Set `SESSION_BACKEND=postgres` to
+have a TTL (default: 1 hour) and an LRU cap. Set `SESSION_BACKEND=postgres` to
 persist sessions across restarts (requires `PG_DSN`).
 
 ### Run request schema

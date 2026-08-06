@@ -12,4 +12,5 @@ __pycache__/
 .ruff_cache/
 docs-projet/*
 !docs-projet/.gitkeep
+!docs-projet/README.md
 rag.db

@@ -47,8 +47,7 @@ class MCPClientManager:
             from mcp.client.stdio import stdio_client  # type: ignore[import-untyped]
         except ImportError as exc:
             raise ImportError(
-                "The 'mcp' package is required to use MCP tools. "
-                "Install it with: pip install mcp"
+                "The 'mcp' package is required to use MCP tools. Install it with: pip install mcp"
             ) from exc
 
         for cfg in self._server_configs:
@@ -88,7 +87,9 @@ class MCPClientManager:
                     tools_resp = await session.list_tools()
                     for tool in tools_resp.tools:
                         self._tool_index[tool.name] = session
-                        log.debug("MCP tool registered: %s (server=%s url=%s)", tool.name, name, url)
+                        log.debug(
+                            "MCP tool registered: %s (server=%s url=%s)", tool.name, name, url
+                        )
                 else:
                     log.warning("MCP server %r: unknown transport %r, skipping", name, transport)
             except Exception as exc:  # noqa: BLE001 - resilient: skip failing servers
@@ -110,11 +111,13 @@ class MCPClientManager:
             tools_resp = await session.list_tools()
             for t in tools_resp.tools:
                 if t.name == name:
-                    result.append({
-                        "name": t.name,
-                        "description": getattr(t, "description", ""),
-                        "input_schema": getattr(t, "inputSchema", {}),
-                    })
+                    result.append(
+                        {
+                            "name": t.name,
+                            "description": getattr(t, "description", ""),
+                            "input_schema": getattr(t, "inputSchema", {}),
+                        }
+                    )
         return result
 
     async def call_tool(self, name: str, arguments: dict) -> str:

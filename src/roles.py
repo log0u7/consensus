@@ -50,7 +50,7 @@ _TEAMS_DIR = Path(__file__).parent.parent / "teams"
 @dataclass
 class Role:
     name: str
-    model: str                          # "provider/model-id"
+    model: str  # "provider/model-id"
     fallback: list[str] = field(default_factory=list)  # provider names
     max_tokens: int | None = None
     skills: list[str] = field(default_factory=list)
@@ -64,23 +64,27 @@ class Role:
 @dataclass
 class Team:
     name: str
-    topology: str                        # "consensus" | "pipeline" | "loop"
+    topology: str  # "consensus" | "pipeline" | "loop"
     roles: dict[str, Role]
-    sandbox: bool = False               # team-level sandbox default
+    sandbox: bool = False  # team-level sandbox default
 
 
 # ---------------------------------------------------------------------------
 # YAML loading
 # ---------------------------------------------------------------------------
 
+
 def _role_from_dict(name: str, d: dict, team_sandbox: bool) -> Role:
     members_raw = d.get("members")
     members: list[dict] | None = None
     if members_raw:
         members = [
-            {"name": m["name"], "model": m["model"],
-             "fallback": m.get("fallback", []),
-             "max_tokens": m.get("max_tokens")}
+            {
+                "name": m["name"],
+                "model": m["model"],
+                "fallback": m.get("fallback", []),
+                "max_tokens": m.get("max_tokens"),
+            }
             for m in members_raw
         ]
     return Role(

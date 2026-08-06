@@ -36,12 +36,13 @@ def test_dump_load_roundtrip_rebuilds_pipeline_result():
 def test_dump_load_with_files():
     """Artifacts in the result must survive a dump/load roundtrip."""
     from src.models import Artifact
+
     result = PipelineResult(
         spec="multi-file",
         code="",
         files=[
             Artifact(path="main.py", language="python", content="x=1"),
-            Artifact(path="lib.py",  language="python", content="y=2"),
+            Artifact(path="lib.py", language="python", content="y=2"),
         ],
         consensus=ConsensusReport(panel=["r1"], summary="ok"),
         verdict="APPROVE",
@@ -56,7 +57,8 @@ def test_dump_load_with_files():
 def test_dump_load_empty_history():
     session = {
         "result": PipelineResult(
-            spec="s", code="c",
+            spec="s",
+            code="c",
             consensus=ConsensusReport(),
         ),
         "system": "",
@@ -69,6 +71,7 @@ def test_dump_load_empty_history():
 def test_dump_result_is_json_serializable():
     """The dumped result dict must be JSON-serializable (for Postgres backend)."""
     import json
+
     dumped = _dump(_sample_session())
     # Should not raise
     json.dumps(dumped)

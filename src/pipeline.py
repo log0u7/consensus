@@ -61,6 +61,7 @@ async def run_streaming(
     if use_rag:
         try:
             from . import rag
+
             hits = await rag.search(spec, k=config.RAG_TOP_K)
             context = "\n\n".join(f"[{h['source']}]\n{h['content']}" for h in hits)
             rag_sources = [
@@ -94,6 +95,7 @@ async def run(
             else:
                 # Non-consensus topologies: return a minimal PipelineResult.
                 from .models import ConsensusReport
+
                 final = PipelineResult(
                     spec=spec,
                     code=raw.get("outputs", {}).get("coder", ""),
@@ -115,6 +117,7 @@ def lead_system_for(result: PipelineResult) -> str:
 
 if __name__ == "__main__":
     import sys
+
     config.setup_logging()
     spec = " ".join(sys.argv[1:]) or (
         "Write a Python script that connects to PostgreSQL and lists users inactive for 90 days."

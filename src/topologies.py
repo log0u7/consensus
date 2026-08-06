@@ -63,6 +63,7 @@ def _panel_members(reviewer_role: Role) -> list[dict]:
 # Topology: consensus  (coder -> panel -> consensus -> lead)
 # ---------------------------------------------------------------------------
 
+
 async def run_consensus(
     team: Team,
     spec: str,
@@ -107,15 +108,20 @@ async def run_consensus(
         if coder_role and coder_role.sandbox and coded["files"]:
             rlog("info", "sandbox: executing generated code")
             import sys as _sys
+
             _pyexe = _sys.executable
             exec_result = await sandbox_mod.run(
                 coded["files"],
-                cmd=f"{_pyexe} {coded['files'][0].path}" if coded["files"] else f"{_pyexe} -c 'pass'",
+                cmd=f"{_pyexe} {coded['files'][0].path}"
+                if coded["files"]
+                else f"{_pyexe} -c 'pass'",
             )
             sandbox_context = exec_result.as_context()
             rlog(
-                "info", "sandbox done: exit=%d timed_out=%s",
-                exec_result.exit_code, exec_result.timed_out,
+                "info",
+                "sandbox done: exit=%d timed_out=%s",
+                exec_result.exit_code,
+                exec_result.timed_out,
             )
             yield {
                 "type": "execution",
@@ -146,9 +152,11 @@ async def run_consensus(
                 "usage": _summarize(usages).model_dump(),
             }
         rlog(
-            "info", "panel done (%.1fs): %d/%d answered",
+            "info",
+            "panel done (%.1fs): %d/%d answered",
             time.perf_counter() - t_panel,
-            sum(1 for r in reviews if r.ok), len(reviews),
+            sum(1 for r in reviews if r.ok),
+            len(reviews),
         )
 
         # 3. Consensus
@@ -165,9 +173,12 @@ async def run_consensus(
 
         summary = _summarize(usages)
         rlog(
-            "info", "run done (%.1fs): %d calls, %d/%d tokens, cost=%s",
-            time.perf_counter() - t0, summary.calls,
-            summary.input_tokens, summary.output_tokens,
+            "info",
+            "run done (%.1fs): %d calls, %d/%d tokens, cost=%s",
+            time.perf_counter() - t0,
+            summary.calls,
+            summary.input_tokens,
+            summary.output_tokens,
             str(summary.cost) if summary.cost_known else "unknown",
         )
 
@@ -206,6 +217,7 @@ async def run_consensus(
 # Topology: pipeline  (planner -> executor -> verifier, sequential)
 # ---------------------------------------------------------------------------
 
+
 async def run_pipeline(
     team: Team,
     spec: str,
@@ -231,11 +243,17 @@ async def run_pipeline(
         for role_name in role_names:
             role = team.roles[role_name]
             prov, mod = role.model.split("/", 1) if "/" in role.model else quota.coder_model()
-            user = f"Task: {spec}\n\nContext so far:\n{accumulated}" if accumulated else f"Task: {spec}"
+            user = (
+                f"Task: {spec}\n\nContext so far:\n{accumulated}"
+                if accumulated
+                else f"Task: {spec}"
+            )
 
             tok = llm.set_step(role_name)
             try:
-                output = await llm.complete(prov, mod, user, max_tokens=role.max_tokens or config.CODER_MAX_TOKENS)
+                output = await llm.complete(
+                    prov, mod, user, max_tokens=role.max_tokens or config.CODER_MAX_TOKENS
+                )
             finally:
                 llm.reset_step(tok)
 
@@ -265,6 +283,7 @@ async def run_pipeline(
 # ---------------------------------------------------------------------------
 # Topology: loop  (recon -> exploit -> report, iterative)
 # ---------------------------------------------------------------------------
+
 
 async def run_loop(
     team: Team,
@@ -297,11 +316,14 @@ async def run_loop(
                 prov, mod = role.model.split("/", 1) if "/" in role.model else quota.coder_model()
                 user = (
                     f"Iteration {i}. Task: {spec}\n\nContext so far:\n{accumulated}"
-                    if accumulated else f"Iteration {i}. Task: {spec}"
+                    if accumulated
+                    else f"Iteration {i}. Task: {spec}"
                 )
                 tok = llm.set_step(f"{role_name}:{i}")
                 try:
-                    output = await llm.complete(prov, mod, user, max_tokens=role.max_tokens or config.CODER_MAX_TOKENS)
+                    output = await llm.complete(
+                        prov, mod, user, max_tokens=role.max_tokens or config.CODER_MAX_TOKENS
+                    )
                 finally:
                     llm.reset_step(tok)
 
@@ -342,8 +364,8 @@ _TopologyFn = Callable[..., AsyncIterator[dict]]
 
 _REGISTRY: dict[str, _TopologyFn] = {
     "consensus": run_consensus,  # type: ignore[dict-item]
-    "pipeline":  run_pipeline,   # type: ignore[dict-item]
-    "loop":      run_loop,       # type: ignore[dict-item]
+    "pipeline": run_pipeline,  # type: ignore[dict-item]
+    "loop": run_loop,  # type: ignore[dict-item]
 }
 
 
@@ -357,8 +379,5 @@ async def run(
     """Dispatch to the topology named in team.topology."""
     fn = _REGISTRY.get(team.topology)
     if fn is None:
-        raise ValueError(
-            f"Unknown topology {team.topology!r}. "
-            f"Available: {list(_REGISTRY)}"
-        )
+        raise ValueError(f"Unknown topology {team.topology!r}. Available: {list(_REGISTRY)}")
     return fn(team, spec, context=context, rag_sources=rag_sources, run_id=run_id)

@@ -62,9 +62,11 @@ async def write_code(spec: str, context: str = "") -> dict:
     provider, model = quota.coder_model()
     tok = llm.set_step("coder")
     try:
+
         def _make(prov: str, attempt: int) -> Awaitable[str]:
             return llm.complete(
-                prov, model,
+                prov,
+                model,
                 user + (llm._JSON_RETRY_HINT if attempt else ""),
                 _CODER_SYS,
                 max_tokens=config.CODER_MAX_TOKENS,
@@ -75,7 +77,7 @@ async def write_code(spec: str, context: str = "") -> dict:
                 provider,
                 lambda: _make(provider, attempt),
                 fallback=config.CODER_FALLBACK,
-                fallback_factory=lambda p: (lambda: _make(p, attempt)),
+                fallback_factory=lambda p: lambda: _make(p, attempt),
             )
         )
     finally:
@@ -118,9 +120,11 @@ async def review_code(panel_member: dict, code: str) -> Review:
     user = f"Code to review:\n\n{code}"
     tok = llm.set_step(f"reviewer:{name}")
     try:
+
         def _make(prov: str, attempt: int) -> Awaitable[str]:
             return llm.complete(
-                prov, model,
+                prov,
+                model,
                 user + (llm._JSON_RETRY_HINT if attempt else ""),
                 _REVIEW_SYS,
                 max_tokens=max_tokens,
@@ -131,7 +135,7 @@ async def review_code(panel_member: dict, code: str) -> Review:
                 provider,
                 lambda: _make(provider, attempt),
                 fallback=config.REVIEWER_FALLBACK,
-                fallback_factory=lambda p: (lambda: _make(p, attempt)),
+                fallback_factory=lambda p: lambda: _make(p, attempt),
             )
         )
         issues = []
@@ -177,18 +181,18 @@ async def build_consensus(reviews: list[Review]) -> ConsensusReport:
     for r in participating:
         lines = [f"### Reviewer: {r.reviewer}", f"overall: {r.overall}"]
         for i in r.issues:
-            lines.append(
-                f"- [{i.severity}/{i.category}] {i.title} @ {i.location}: {i.description}"
-            )
+            lines.append(f"- [{i.severity}/{i.category}] {i.title} @ {i.location}: {i.description}")
         blob_parts.append("\n".join(lines))
     blob = "\n\n".join(blob_parts)
 
     provider, model = quota.consensus_model()
     tok = llm.set_step("consensus")
     try:
+
         def _make(prov: str, attempt: int) -> Awaitable[str]:
             return llm.complete(
-                prov, model,
+                prov,
+                model,
                 f"Reviews:\n\n{blob}" + (llm._JSON_RETRY_HINT if attempt else ""),
                 _CONSENSUS_SYS,
                 max_tokens=config.CONSENSUS_MAX_TOKENS,
@@ -199,7 +203,7 @@ async def build_consensus(reviews: list[Review]) -> ConsensusReport:
                 provider,
                 lambda: _make(provider, attempt),
                 fallback=config.CONSENSUS_FALLBACK,
-                fallback_factory=lambda p: (lambda: _make(p, attempt)),
+                fallback_factory=lambda p: lambda: _make(p, attempt),
             )
         )
     finally:
@@ -216,7 +220,8 @@ async def build_consensus(reviews: list[Review]) -> ConsensusReport:
         if unknown:
             log.warning(
                 "consensus flagged_by referenced unknown reviewers %s (panel=%s)",
-                unknown, panel_names,
+                unknown,
+                panel_names,
             )
         flagged = sorted({r for r in raw_flagged if r in valid_names})
         score = round(min(len(flagged), n) / n, 3)
@@ -291,9 +296,11 @@ async def lead_verdict(spec: str, code: str, consensus_json: str) -> dict:
         return min(config.LEAD_MAX_TOKENS * (attempt + 1), 64000)
 
     try:
+
         def _make(prov: str, attempt: int) -> Awaitable[str]:
             return llm.complete(
-                prov, model,
+                prov,
+                model,
                 _LEAD_VERDICT_INSTR + (llm._JSON_RETRY_HINT if attempt else ""),
                 system,
                 max_tokens=_budget(attempt),
@@ -304,7 +311,7 @@ async def lead_verdict(spec: str, code: str, consensus_json: str) -> dict:
                 provider,
                 lambda: _make(provider, attempt),
                 fallback=config.LEAD_FALLBACK,
-                fallback_factory=lambda p: (lambda: _make(p, attempt)),
+                fallback_factory=lambda p: lambda: _make(p, attempt),
             )
         )
     except ValueError as exc:
@@ -339,6 +346,7 @@ async def lead_regen_artifacts(system: str, history: list[dict[str, str]]) -> li
     provider, model = quota.lead_model()
     tok = llm.set_step("chat")
     try:
+
         def _make_call(attempt: int):
             instr = _LEAD_REGEN_INSTR + (llm._JSON_RETRY_HINT if attempt else "")
             messages = _with_system(system, list(history) + [{"role": "user", "content": instr}])
@@ -356,8 +364,9 @@ async def lead_chat(system: str, history: list[dict[str, str]]) -> str:
     # Anthropic transport uses system as a top-level parameter; openai-compatible
     # transports embed the system message as the first message in the list.
     if provider == "anthropic":
-        return await llm.call_anthropic_history(model, history, system=system,
-                                                max_tokens=config.CHAT_MAX_TOKENS)
+        return await llm.call_anthropic_history(
+            model, history, system=system, max_tokens=config.CHAT_MAX_TOKENS
+        )
     # Prepend system as a system message for openai-compatible providers.
     messages = _with_system(system, history)
     return await llm.complete_history(provider, model, messages, config.CHAT_MAX_TOKENS)
@@ -368,8 +377,9 @@ def lead_chat_stream(system: str, history: list[dict[str, str]]):
     Anthropic uses native SSE streaming; other providers emit one chunk."""
     provider, model = quota.lead_model()
     if provider == "anthropic":
-        return llm.call_anthropic_history_stream(model, history, system=system,
-                                                 max_tokens=config.CHAT_MAX_TOKENS)
+        return llm.call_anthropic_history_stream(
+            model, history, system=system, max_tokens=config.CHAT_MAX_TOKENS
+        )
     # Non-Anthropic: full history, wrapped as an async generator.
     messages = _with_system(system, history)
 

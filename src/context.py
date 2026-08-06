@@ -86,8 +86,11 @@ async def build(
     if role.rag_ns and not rag_hits:
         try:
             from . import rag
+
             hits = await rag.search(spec, k=3)
-            log.debug("context builder: RAG retrieved %d chunk(s) for ns=%s", len(hits), role.rag_ns)
+            log.debug(
+                "context builder: RAG retrieved %d chunk(s) for ns=%s", len(hits), role.rag_ns
+            )
         except Exception as exc:  # noqa: BLE001
             log.warning("context builder: RAG skipped (%s)", exc)
     elif rag_hits:

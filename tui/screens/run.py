@@ -9,7 +9,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.message import Message
 from textual.screen import Screen
-from textual.widgets import Button, Header, RichLog, TextArea
+from textual.widgets import Button, Checkbox, Header, RichLog, TextArea
 
 from tui import esc
 from tui.api import APIClient
@@ -104,6 +104,7 @@ class RunScreen(Screen):
         yield TextArea(id="run-spec-area", text="", placeholder="Enter your specification here...")
         with Horizontal(id="run-button-row"):
             yield Button("Run Pipeline", id="run-button", variant="primary")
+            yield Checkbox("Use RAG", id="use-rag-toggle", value=False)
         yield RichLog(id="run-output", highlight=True, max_lines=10000, markup=True)
 
     def on_mount(self) -> None:
@@ -140,7 +141,8 @@ class RunScreen(Screen):
         api = self._api_client
 
         try:
-            async for event in api.run_stream(spec, use_rag=False):
+            use_rag = self.query_one("#use-rag-toggle", Checkbox).value
+            async for event in api.run_stream(spec, use_rag=use_rag):
                 self._handle_event(output, event)
 
                 if event.get("type") == "result":

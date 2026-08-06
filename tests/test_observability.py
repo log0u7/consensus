@@ -1,5 +1,6 @@
 import logging
 
+import httpx
 import pytest
 from src import llm
 
@@ -37,9 +38,20 @@ async def test_run_streaming_logs_run_id(monkeypatch, caplog):
 
 
 @pytest.mark.asyncio
-async def test_provider_reachable_error_path():
+async def test_provider_reachable_error_path(monkeypatch):
     """provider_reachable returns reachable=False on an unreachable host, no raise."""
+
+    class BrokenClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def get(self, *args, **kwargs):
+            raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(llm.httpx, "AsyncClient", lambda *a, **kw: BrokenClient())
     out = await llm.provider_reachable("zen", timeout=1.0)
-    # ZEN_API_KEY=dummy -> may reach or not, but must not raise
-    assert "reachable" in out
-    assert "error" in out
+    assert out["reachable"] is False
+    assert out["error"]

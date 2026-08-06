@@ -32,6 +32,7 @@ log = logging.getLogger(__name__)
 # HTTP client factory (DRY: single place for auth, TLS, timeout)
 # ---------------------------------------------------------------------------
 
+
 def _client(provider: config.Provider) -> httpx.AsyncClient:
     """Return a configured async client for the given provider."""
     return httpx.AsyncClient(
@@ -53,6 +54,7 @@ def _client(provider: config.Provider) -> httpx.AsyncClient:
 # governed context (e.g. streaming chat).
 # ---------------------------------------------------------------------------
 
+
 def _parse_retry_after(value: str | None) -> float | None:
     if not value:
         return None
@@ -68,21 +70,21 @@ def _parse_retry_after(value: str | None) -> float | None:
     if dt is None:
         return None
     import datetime as _dt
+
     now = _dt.datetime.now(dt.tzinfo) if dt.tzinfo else _dt.datetime.now()
     return max(0.0, (dt - now).total_seconds())
 
 
 def _backoff_delay(attempt: int, retry_after: float | None) -> float:
     import random
+
     if retry_after is not None:
         return min(retry_after, config.RATE_LIMIT_MAX_DELAY)
-    base = config.RATE_LIMIT_BASE_DELAY * (2 ** attempt)
+    base = config.RATE_LIMIT_BASE_DELAY * (2**attempt)
     return min(base, config.RATE_LIMIT_MAX_DELAY) * (0.5 + random.random() / 2)
 
 
-async def _post_with_retry(
-    client: httpx.AsyncClient, path: str, **kwargs
-) -> httpx.Response:
+async def _post_with_retry(client: httpx.AsyncClient, path: str, **kwargs) -> httpx.Response:
     """POST with retry on rate-limit/transient statuses."""
     attempt = 0
     while True:
@@ -91,12 +93,14 @@ async def _post_with_retry(
             r.status_code in config.RATE_LIMIT_RETRY_STATUSES
             and attempt < config.RATE_LIMIT_MAX_RETRIES
         ):
-            delay = _backoff_delay(
-                attempt, _parse_retry_after(r.headers.get("Retry-After"))
-            )
+            delay = _backoff_delay(attempt, _parse_retry_after(r.headers.get("Retry-After")))
             log.warning(
                 "provider %s on %s; retry in %.1fs (attempt %d/%d)",
-                r.status_code, path, delay, attempt + 1, config.RATE_LIMIT_MAX_RETRIES,
+                r.status_code,
+                path,
+                delay,
+                attempt + 1,
+                config.RATE_LIMIT_MAX_RETRIES,
             )
             await asyncio.sleep(delay)
             attempt += 1
@@ -111,6 +115,7 @@ def _maybe_auto_low_quota(status: int) -> None:
     if not config.AUTO_LOW_QUOTA or status != 429:
         return
     from . import quota
+
     if not quota.is_low_quota():
         quota.set_low_quota(True)
         log.warning("429 retries exhausted; auto-enabling low-quota mode")
@@ -123,9 +128,7 @@ def _maybe_auto_low_quota(status: int) -> None:
 _usage_sink: contextvars.ContextVar[list[Usage] | None] = contextvars.ContextVar(
     "usage_sink", default=None
 )
-_current_step: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "current_step", default=""
-)
+_current_step: contextvars.ContextVar[str] = contextvars.ContextVar("current_step", default="")
 
 
 class usage_scope:
@@ -194,6 +197,7 @@ def _read_usage_anthropic(data: dict) -> tuple[int, int]:
 # Health probe (no billable call)
 # ---------------------------------------------------------------------------
 
+
 async def provider_reachable(provider_name: str, timeout: float = 5.0) -> dict:
     """Lightweight reachability probe for the /health or /models endpoint."""
     try:
@@ -214,6 +218,7 @@ async def provider_reachable(provider_name: str, timeout: float = 5.0) -> dict:
 # OpenAI-compatible transport  (Zen, OpenAI, local, ...)
 # POST /chat/completions
 # ---------------------------------------------------------------------------
+
 
 async def call_openai_compatible(
     provider_name: str,
@@ -238,6 +243,7 @@ async def call_openai_compatible_history(
 ) -> str:
     """Multi-turn completion via POST /chat/completions (full message history)."""
     from . import cache as cache_mod
+
     cached = cache_mod.get(messages, model)
     if cached is not None:
         return cached
@@ -264,6 +270,7 @@ async def call_openai_compatible_history(
 # POST /messages
 # ---------------------------------------------------------------------------
 
+
 async def call_anthropic(
     model: str,
     user: str,
@@ -271,7 +278,9 @@ async def call_anthropic(
     max_tokens: int = 4096,
 ) -> str:
     """Single-turn completion via Anthropic Messages API."""
-    return await _call_anthropic_messages(model, [{"role": "user", "content": user}], system, max_tokens)
+    return await _call_anthropic_messages(
+        model, [{"role": "user", "content": user}], system, max_tokens
+    )
 
 
 async def call_anthropic_history(
@@ -291,6 +300,7 @@ async def _call_anthropic_messages(
     max_tokens: int,
 ) -> str:
     from . import cache as cache_mod
+
     cache_key_msgs = [{"role": "system", "content": system or ""}, *messages]
     cached = cache_mod.get(cache_key_msgs, model)
     if cached is not None:
@@ -310,9 +320,7 @@ async def _call_anthropic_messages(
         data = r.json()
     inp, out = _read_usage_anthropic(data)
     _record("anthropic", model, inp, out, None, int((time.perf_counter() - t0) * 1000))
-    result = "".join(
-        b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"
-    )
+    result = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
     cache_mod.put(cache_key_msgs, model, result)
     return result
 
@@ -349,7 +357,10 @@ async def call_anthropic_history_stream(
                     )
                     log.warning(
                         "provider %s on stream; retry in %.1fs (attempt %d/%d)",
-                        r.status_code, delay, attempt + 1, config.RATE_LIMIT_MAX_RETRIES,
+                        r.status_code,
+                        delay,
+                        attempt + 1,
+                        config.RATE_LIMIT_MAX_RETRIES,
                     )
                     await r.aclose()
                     await asyncio.sleep(delay)
@@ -361,7 +372,7 @@ async def call_anthropic_history_stream(
                 async for line in r.aiter_lines():
                     if not line.startswith("data:"):
                         continue
-                    raw = line[len("data:"):].strip()
+                    raw = line[len("data:") :].strip()
                     if not raw:
                         continue
                     try:
@@ -383,7 +394,11 @@ async def call_anthropic_history_stream(
                         output_tokens = int(u.get("output_tokens", output_tokens))
             break
     _record(
-        "anthropic", model, input_tokens, output_tokens, None,
+        "anthropic",
+        model,
+        input_tokens,
+        output_tokens,
+        None,
         int((time.perf_counter() - t0) * 1000),
     )
 
@@ -391,6 +406,7 @@ async def call_anthropic_history_stream(
 # ---------------------------------------------------------------------------
 # Transport dispatch  (KISS: simple if/elif over 2 wire formats)
 # ---------------------------------------------------------------------------
+
 
 async def complete(
     provider_name: str,
@@ -457,6 +473,7 @@ def parse_json(text: str) -> "dict | list | None":
     # Last resort: try json-repair if available
     try:
         from json_repair import repair_json  # type: ignore[import-untyped]
+
         repaired = repair_json(text)
         if repaired:
             parsed = json.loads(repaired)

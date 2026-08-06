@@ -40,8 +40,8 @@ from collections import OrderedDict
 log = logging.getLogger(__name__)
 
 RESPONSE_CACHE = os.environ.get("RESPONSE_CACHE", "0").strip() in ("1", "true", "yes")
-CACHE_BACKEND  = os.environ.get("CACHE_BACKEND", "memory").lower()
-CACHE_DB_PATH  = os.environ.get("CACHE_DB_PATH", "cache.db")
+CACHE_BACKEND = os.environ.get("CACHE_BACKEND", "memory").lower()
+CACHE_DB_PATH = os.environ.get("CACHE_DB_PATH", "cache.db")
 CACHE_MAX_ENTRIES = int(os.environ.get("CACHE_MAX_ENTRIES", "1000"))
 
 
@@ -54,6 +54,7 @@ def _hash(messages: list[dict], model: str) -> str:
 # ---------------------------------------------------------------------------
 # Backend interface
 # ---------------------------------------------------------------------------
+
 
 class CacheBackend(ABC):
     @abstractmethod
@@ -72,6 +73,7 @@ class CacheBackend(ABC):
 # ---------------------------------------------------------------------------
 # Memory backend (LRU cap via OrderedDict)
 # ---------------------------------------------------------------------------
+
 
 class MemoryBackend(CacheBackend):
     def __init__(self, max_entries: int = CACHE_MAX_ENTRIES) -> None:
@@ -102,9 +104,11 @@ class MemoryBackend(CacheBackend):
 # SQLite backend (persisted, no extra deps - stdlib sqlite3)
 # ---------------------------------------------------------------------------
 
+
 class SQLiteBackend(CacheBackend):
     def __init__(self, path: str = CACHE_DB_PATH) -> None:
         import sqlite3
+
         self._path = path
         self._db = sqlite3.connect(path, check_same_thread=False)
         self._db.execute(
@@ -114,15 +118,11 @@ class SQLiteBackend(CacheBackend):
         self._db.commit()
 
     def get(self, key: str) -> str | None:
-        row = self._db.execute(
-            "SELECT value FROM cache WHERE key = ?", (key,)
-        ).fetchone()
+        row = self._db.execute("SELECT value FROM cache WHERE key = ?", (key,)).fetchone()
         return row[0] if row else None
 
     def set(self, key: str, value: str) -> None:
-        self._db.execute(
-            "INSERT OR REPLACE INTO cache (key, value) VALUES (?, ?)", (key, value)
-        )
+        self._db.execute("INSERT OR REPLACE INTO cache (key, value) VALUES (?, ?)", (key, value))
         self._db.commit()
 
     def __len__(self) -> int:
@@ -137,6 +137,7 @@ class SQLiteBackend(CacheBackend):
 # ---------------------------------------------------------------------------
 # Module-level cache instance
 # ---------------------------------------------------------------------------
+
 
 def _make_backend() -> CacheBackend:
     if CACHE_BACKEND == "sqlite":

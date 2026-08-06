@@ -6,6 +6,7 @@ from src.cache import MemoryBackend, SQLiteBackend, _hash
 # Hash stability
 # ---------------------------------------------------------------------------
 
+
 def test_hash_deterministic():
     msgs = [{"role": "user", "content": "hello"}]
     assert _hash(msgs, "model-a") == _hash(msgs, "model-a")
@@ -25,6 +26,7 @@ def test_hash_differs_by_content():
 # ---------------------------------------------------------------------------
 # MemoryBackend
 # ---------------------------------------------------------------------------
+
 
 def test_memory_miss():
     b = MemoryBackend()
@@ -59,6 +61,7 @@ def test_memory_clear():
 # SQLiteBackend
 # ---------------------------------------------------------------------------
 
+
 def test_sqlite_set_get(tmp_path):
     b = SQLiteBackend(str(tmp_path / "cache.db"))
     b.set("k", "v")
@@ -89,8 +92,10 @@ def test_sqlite_clear(tmp_path):
 # Module-level cache API (with RESPONSE_CACHE=1 monkeypatching)
 # ---------------------------------------------------------------------------
 
+
 def test_cache_get_put_roundtrip(monkeypatch):
     import src.cache as cache_mod
+
     monkeypatch.setattr(cache_mod, "RESPONSE_CACHE", True)
     monkeypatch.setattr(cache_mod, "_backend", MemoryBackend())
 
@@ -102,6 +107,7 @@ def test_cache_get_put_roundtrip(monkeypatch):
 
 def test_cache_disabled_by_default(monkeypatch):
     import src.cache as cache_mod
+
     monkeypatch.setattr(cache_mod, "RESPONSE_CACHE", False)
     monkeypatch.setattr(cache_mod, "_backend", MemoryBackend())
 
@@ -113,6 +119,7 @@ def test_cache_disabled_by_default(monkeypatch):
 
 def test_cache_stats(monkeypatch):
     import src.cache as cache_mod
+
     monkeypatch.setattr(cache_mod, "RESPONSE_CACHE", True)
     monkeypatch.setattr(cache_mod, "_backend", MemoryBackend())
     s = cache_mod.stats()

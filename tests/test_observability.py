@@ -15,10 +15,12 @@ async def test_run_streaming_logs_run_id(monkeypatch, caplog):
 
     async def fake_review(member, code):
         from src.models import Review
+
         return Review(reviewer=member["name"], ok=True)
 
     async def fake_consensus(reviews):
         from src.models import ConsensusReport
+
         return ConsensusReport(panel=[r.reviewer for r in reviews], summary="ok")
 
     async def fake_verdict(spec, code, cj):

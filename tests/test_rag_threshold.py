@@ -72,7 +72,7 @@ async def test_search_min_score_zero_keeps_all(monkeypatch):
     """min_score=0 must return every row regardless of their score."""
     rows = [
         ("a.md", 0, "alpha", 0.99),
-        ("b.md", 1, "beta",  0.01),
+        ("b.md", 1, "beta", 0.01),
         ("c.md", 2, "gamma", 0.0),
     ]
 

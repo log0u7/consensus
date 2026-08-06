@@ -21,6 +21,7 @@ log = logging.getLogger(__name__)
 # Embeddings (shared by both backends)
 # ---------------------------------------------------------------------------
 
+
 async def embed(texts: list[str]) -> list[list[float]]:
     provider = config.get_provider(config.EMBED_PROVIDER)
     payload = {"model": config.EMBED_MODEL, "input": texts}
@@ -34,7 +35,7 @@ async def embed(texts: list[str]) -> list[list[float]]:
 def _chunk(text: str, size: int = 1000, overlap: int = 200):
     out, i, idx = [], 0, 0
     while i < len(text):
-        out.append((idx, text[i: i + size]))
+        out.append((idx, text[i : i + size]))
         i += size - overlap
         idx += 1
     return out
@@ -44,9 +45,11 @@ def _chunk(text: str, size: int = 1000, overlap: int = 200):
 # Backend: pgvector (default)
 # ---------------------------------------------------------------------------
 
+
 def _pg_conn():
     import psycopg
     from pgvector.psycopg import register_vector
+
     conn = psycopg.connect(config.PG_DSN)
     register_vector(conn)
     return conn
@@ -76,6 +79,7 @@ def _pg_init_schema() -> None:
 
 async def _pg_index(directory: str) -> None:
     from pathlib import Path
+
     _pg_init_schema()
     root = Path(directory)
     files = [p for p in root.rglob("*") if p.suffix in {".md", ".txt", ".py", ".rst"}]
@@ -110,16 +114,14 @@ async def _pg_search(query: str, k: int, min_score: float) -> list[dict]:
     except Exception as exc:  # noqa: BLE001 - missing table / empty store
         log.warning("pgvector RAG search skipped (%s: %s)", type(exc).__name__, exc)
         return []
-    hits = [
-        {"source": s, "chunk_idx": i, "content": c, "score": float(sc)}
-        for s, i, c, sc in rows
-    ]
+    hits = [{"source": s, "chunk_idx": i, "content": c, "score": float(sc)} for s, i, c, sc in rows]
     return [h for h in hits if h["score"] >= min_score]
 
 
 # ---------------------------------------------------------------------------
 # Backend: sqlite-vec (optional)
 # ---------------------------------------------------------------------------
+
 
 async def _sqlite_index(directory: str) -> None:
     import sqlite3
@@ -191,6 +193,7 @@ async def _sqlite_search(query: str, k: int, min_score: float) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Public API (dispatch to configured backend)
 # ---------------------------------------------------------------------------
+
 
 async def index_directory(directory: str) -> None:
     if config.RAG_BACKEND == "sqlite":

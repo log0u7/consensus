@@ -16,10 +16,13 @@ from src.models import Review
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_fake_json_obj(return_value: dict):
     """Return a coroutine that ignores its make_call argument and yields the dict."""
+
     async def _fake(make_call, retries=2):
         return return_value
+
     return _fake
 
 
@@ -27,10 +30,12 @@ def _make_fake_json_obj(return_value: dict):
 # write_code
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_write_code_single_file(monkeypatch):
     monkeypatch.setattr(
-        agents.llm, "complete_json_obj",
+        agents.llm,
+        "complete_json_obj",
         _make_fake_json_obj({"language": "python", "code": "print(1)", "notes": "ok"}),
     )
     result = await agents.write_code("print 1")
@@ -43,10 +48,11 @@ async def test_write_code_single_file(monkeypatch):
 async def test_write_code_multi_file(monkeypatch):
     files_payload = [
         {"path": "main.py", "language": "python", "content": "import mod"},
-        {"path": "mod.py",  "language": "python", "content": "x = 1"},
+        {"path": "mod.py", "language": "python", "content": "x = 1"},
     ]
     monkeypatch.setattr(
-        agents.llm, "complete_json_obj",
+        agents.llm,
+        "complete_json_obj",
         _make_fake_json_obj({"language": "python", "files": files_payload, "notes": "split"}),
     )
     result = await agents.write_code("multi-file app")
@@ -62,10 +68,11 @@ async def test_write_code_strips_invalid_file(monkeypatch):
     """An artifact with a path containing '..' must be sanitized (dropped or cleaned)."""
     files_payload = [
         {"path": "../evil.py", "language": "python", "content": "x=1"},
-        {"path": "safe.py",   "language": "python", "content": "x=2"},
+        {"path": "safe.py", "language": "python", "content": "x=2"},
     ]
     monkeypatch.setattr(
-        agents.llm, "complete_json_obj",
+        agents.llm,
+        "complete_json_obj",
         _make_fake_json_obj({"language": "python", "files": files_payload}),
     )
     result = await agents.write_code("exploit")
@@ -96,18 +103,26 @@ async def test_write_code_with_context(monkeypatch):
 # review_code
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_review_code_ok(monkeypatch):
     monkeypatch.setattr(
-        agents.llm, "complete_json_obj",
-        _make_fake_json_obj({
-            "issues": [
-                {"title": "SQL injection", "severity": "critical",
-                 "category": "security", "location": "line 5",
-                 "description": "unescaped input"},
-            ],
-            "overall": "looks risky",
-        }),
+        agents.llm,
+        "complete_json_obj",
+        _make_fake_json_obj(
+            {
+                "issues": [
+                    {
+                        "title": "SQL injection",
+                        "severity": "critical",
+                        "category": "security",
+                        "location": "line 5",
+                        "description": "unescaped input",
+                    },
+                ],
+                "overall": "looks risky",
+            }
+        ),
     )
     member = {"name": "r1", "provider": "zen", "model": "deepseek-v3-0324"}
     review = await agents.review_code(member, "code here")
@@ -120,6 +135,7 @@ async def test_review_code_ok(monkeypatch):
 @pytest.mark.asyncio
 async def test_review_code_failure_returns_ok_false(monkeypatch):
     """A reviewer that raises must return Review(ok=False) without propagating."""
+
     async def _boom(make_call, retries=2):
         raise RuntimeError("network error")
 
@@ -135,28 +151,42 @@ async def test_review_code_failure_returns_ok_false(monkeypatch):
 async def test_review_code_normalizes_severity(monkeypatch):
     """Unknown severity values are normalised to the default 'medium'."""
     monkeypatch.setattr(
-        agents.llm, "complete_json_obj",
-        _make_fake_json_obj({
-            "issues": [
-                {"title": "ok issue", "severity": "CRITICAL",   # uppercase -> normalised
-                 "category": "security", "location": "line 1", "description": "d"},
-                {"title": "unknown sev", "severity": "bogus",   # unknown -> default
-                 "category": "style",    "location": "line 2", "description": "d"},
-            ],
-            "overall": "mixed",
-        }),
+        agents.llm,
+        "complete_json_obj",
+        _make_fake_json_obj(
+            {
+                "issues": [
+                    {
+                        "title": "ok issue",
+                        "severity": "CRITICAL",  # uppercase -> normalised
+                        "category": "security",
+                        "location": "line 1",
+                        "description": "d",
+                    },
+                    {
+                        "title": "unknown sev",
+                        "severity": "bogus",  # unknown -> default
+                        "category": "style",
+                        "location": "line 2",
+                        "description": "d",
+                    },
+                ],
+                "overall": "mixed",
+            }
+        ),
     )
     member = {"name": "r2", "provider": "zen", "model": "x"}
     review = await agents.review_code(member, "code")
     assert review.ok is True
     assert len(review.issues) == 2
     assert review.issues[0].severity == "critical"  # normalised from CRITICAL
-    assert review.issues[1].severity == "medium"    # default for unknown
+    assert review.issues[1].severity == "medium"  # default for unknown
 
 
 # ---------------------------------------------------------------------------
 # build_consensus
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_consensus_all_failed_reviewers():
@@ -173,18 +203,23 @@ async def test_consensus_score_clamped_to_one(monkeypatch):
     reviews = [Review(reviewer="a", ok=True), Review(reviewer="b", ok=True)]
 
     monkeypatch.setattr(
-        agents.llm, "complete_json_obj",
-        _make_fake_json_obj({
-            "issues": [{
-                "title": "overflow",
-                "severity": "high",
-                "category": "correctness",
-                "description": "x",
-                # 4 names for a 2-person panel (after dedup/filter -> a, b -> 2/2 = 1.0)
-                "flagged_by": ["a", "b", "a", "b"],
-            }],
-            "summary": "ok",
-        }),
+        agents.llm,
+        "complete_json_obj",
+        _make_fake_json_obj(
+            {
+                "issues": [
+                    {
+                        "title": "overflow",
+                        "severity": "high",
+                        "category": "correctness",
+                        "description": "x",
+                        # 4 names for a 2-person panel (after dedup/filter -> a, b -> 2/2 = 1.0)
+                        "flagged_by": ["a", "b", "a", "b"],
+                    }
+                ],
+                "summary": "ok",
+            }
+        ),
     )
     report = await agents.build_consensus(reviews)
     assert len(report.issues) == 1
@@ -197,17 +232,22 @@ async def test_consensus_unknown_reviewer_dropped(monkeypatch):
     reviews = [Review(reviewer="alice", ok=True), Review(reviewer="bob", ok=True)]
 
     monkeypatch.setattr(
-        agents.llm, "complete_json_obj",
-        _make_fake_json_obj({
-            "issues": [{
-                "title": "issue",
-                "severity": "medium",
-                "category": "correctness",
-                "description": "d",
-                "flagged_by": ["alice", "ghost"],  # ghost not in panel
-            }],
-            "summary": "ok",
-        }),
+        agents.llm,
+        "complete_json_obj",
+        _make_fake_json_obj(
+            {
+                "issues": [
+                    {
+                        "title": "issue",
+                        "severity": "medium",
+                        "category": "correctness",
+                        "description": "d",
+                        "flagged_by": ["alice", "ghost"],  # ghost not in panel
+                    }
+                ],
+                "summary": "ok",
+            }
+        ),
     )
     report = await agents.build_consensus(reviews)
     assert len(report.issues) == 1
@@ -226,18 +266,36 @@ async def test_consensus_sorted_by_score_then_severity(monkeypatch):
     ]
 
     monkeypatch.setattr(
-        agents.llm, "complete_json_obj",
-        _make_fake_json_obj({
-            "issues": [
-                {"title": "low-conf-critical",  "severity": "critical",  "category": "security",
-                 "description": "d", "flagged_by": ["a"]},          # score 1/3
-                {"title": "high-conf-medium",   "severity": "medium",   "category": "correctness",
-                 "description": "d", "flagged_by": ["a", "b", "c"]}, # score 3/3 = 1.0
-                {"title": "mid-conf-high",      "severity": "high",     "category": "security",
-                 "description": "d", "flagged_by": ["a", "b"]},      # score 2/3
-            ],
-            "summary": "ok",
-        }),
+        agents.llm,
+        "complete_json_obj",
+        _make_fake_json_obj(
+            {
+                "issues": [
+                    {
+                        "title": "low-conf-critical",
+                        "severity": "critical",
+                        "category": "security",
+                        "description": "d",
+                        "flagged_by": ["a"],
+                    },  # score 1/3
+                    {
+                        "title": "high-conf-medium",
+                        "severity": "medium",
+                        "category": "correctness",
+                        "description": "d",
+                        "flagged_by": ["a", "b", "c"],
+                    },  # score 3/3 = 1.0
+                    {
+                        "title": "mid-conf-high",
+                        "severity": "high",
+                        "category": "security",
+                        "description": "d",
+                        "flagged_by": ["a", "b"],
+                    },  # score 2/3
+                ],
+                "summary": "ok",
+            }
+        ),
     )
     report = await agents.build_consensus(reviews)
     titles = [i.title for i in report.issues]
@@ -250,16 +308,20 @@ async def test_consensus_sorted_by_score_then_severity(monkeypatch):
 # lead_verdict
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_lead_verdict_ok(monkeypatch):
     monkeypatch.setattr(
-        agents.llm, "complete_json_obj",
-        _make_fake_json_obj({
-            "verdict": "APPROVE",
-            "rationale": "LGTM",
-            "final_code": "print(1)",
-            "files": [],
-        }),
+        agents.llm,
+        "complete_json_obj",
+        _make_fake_json_obj(
+            {
+                "verdict": "APPROVE",
+                "rationale": "LGTM",
+                "final_code": "print(1)",
+                "files": [],
+            }
+        ),
     )
     result = await agents.lead_verdict("spec", "code", "{}")
     assert result["verdict"] == "APPROVE"
@@ -271,6 +333,7 @@ async def test_lead_verdict_ok(monkeypatch):
 async def test_lead_verdict_degraded_on_parse_failure(monkeypatch):
     """When complete_json_obj raises ValueError, lead_verdict returns a degraded
     verdict instead of propagating the exception."""
+
     async def _fail(make_call, retries=2):
         raise ValueError("truncated JSON")
 
@@ -285,16 +348,19 @@ async def test_lead_verdict_degraded_on_parse_failure(monkeypatch):
 @pytest.mark.asyncio
 async def test_lead_verdict_multi_file(monkeypatch):
     monkeypatch.setattr(
-        agents.llm, "complete_json_obj",
-        _make_fake_json_obj({
-            "verdict": "APPROVE",
-            "rationale": "looks good",
-            "final_code": "",
-            "files": [
-                {"path": "app.py", "language": "python", "content": "x=1"},
-                {"path": "lib.py", "language": "python", "content": "y=2"},
-            ],
-        }),
+        agents.llm,
+        "complete_json_obj",
+        _make_fake_json_obj(
+            {
+                "verdict": "APPROVE",
+                "rationale": "looks good",
+                "final_code": "",
+                "files": [
+                    {"path": "app.py", "language": "python", "content": "x=1"},
+                    {"path": "lib.py", "language": "python", "content": "y=2"},
+                ],
+            }
+        ),
     )
     result = await agents.lead_verdict("spec", "code", "{}")
     assert len(result["files"]) == 2

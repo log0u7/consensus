@@ -33,6 +33,7 @@ log = logging.getLogger(__name__)
 # A session value is {"result": PipelineResult, "system": str, "history": list}.
 # For storage we serialize result to its JSON dump.
 
+
 def _dump(value: dict) -> dict:
     result = value.get("result")
     return {

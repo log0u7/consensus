@@ -11,6 +11,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import Button, Header, Label, ListItem, ListView, RichLog
 
+from tui import esc
 from tui.api import APIClient
 from tui.widgets.status_bar import StatusBar
 
@@ -148,9 +149,9 @@ class ArtifactScreen(Screen):
         lang = f.get("language", "")
         content_view = self.query_one("#content-view", RichLog)
         content_view.clear()
-        content_view.write(f"[bold]{path}[/] ({lang})")
+        content_view.write(f"[bold]{esc(path)}[/] ({esc(lang)})")
         content_view.write("")
-        content_view.write(content)
+        content_view.write(esc(content))
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "format-cycle-button":

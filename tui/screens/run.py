@@ -11,6 +11,7 @@ from textual.message import Message
 from textual.screen import Screen
 from textual.widgets import Button, Header, RichLog, TextArea
 
+from tui import esc
 from tui.api import APIClient
 from tui.widgets.status_bar import StatusBar
 
@@ -175,7 +176,7 @@ class RunScreen(Screen):
             code = event.get("code", "")
             lang = event.get("language", "")
             lines = code.split("\n")
-            output.write(f"\n[bold]Code generated[/] ({lang}, {len(lines)} lines)")
+            output.write(f"\n[bold]Code generated[/] ({esc(lang)}, {len(lines)} lines)")
             usage = event.get("usage", {})
             if usage:
                 output.write(f"  usage: {usage.get('input_tokens', 0)} in / {usage.get('output_tokens', 0)} out")
@@ -187,16 +188,16 @@ class RunScreen(Screen):
             issues = review.get("issues", [])
             status = "ok" if ok else "FAILED"
             color = "green" if ok else "red"
-            output.write(f"\n[bold {color}]Review: {name} ({status})[/]")
+            output.write(f"\n[bold {color}]Review: {esc(name)} ({status})[/]")
             if review.get("error"):
-                output.write(f"  error: {review['error']}")
+                output.write(f"  error: {esc(review['error'])}")
             for issue in issues:
                 sev = issue.get("severity", "?")
                 cat = issue.get("category", "?")
                 title = issue.get("title", "?")
-                output.write(f"  [{_sev_color(sev)}]{sev.upper():12s}[/] [{cat}]{title}[/]")
+                output.write(f"  [{_sev_color(sev)}]{esc(sev.upper()):12s}[/] [{esc(cat)}]{esc(title)}[/]")
             if review.get("overall"):
-                output.write(f"  overall: {review['overall']}")
+                output.write(f"  overall: {esc(review['overall'])}")
 
         elif etype == "consensus":
             consensus = event.get("consensus", {})
@@ -209,36 +210,36 @@ class RunScreen(Screen):
                 title = issue.get("title", "?")
                 bar = _score_bar(score)
                 output.write(
-                    f"  [{_sev_color(sev)}]{sev.upper():12s}[/] "
+                    f"  [{_sev_color(sev)}]{esc(sev.upper()):12s}[/] "
                     f"{bar} {score:.2f} "
-                    f"[dim]{', '.join(flagged)}[/] "
-                    f"{title}"
+                    f"[dim]{esc(', '.join(flagged))}[/] "
+                    f"{esc(title)}"
                 )
 
         elif etype == "result":
             result = event.get("result", {})
             verdict = result.get("verdict", "?")
             vcolor = {"APPROVE": "green", "APPROVE_WITH_CHANGES": "yellow", "REJECT": "red"}.get(verdict, "white")
-            output.write(f"\n[bold {vcolor}]Verdict: {verdict}[/]")
+            output.write(f"\n[bold {vcolor}]Verdict: {esc(verdict)}[/]")
             rationale = result.get("rationale", "")
             if rationale:
-                output.write(f"\n{rationale}")
+                output.write(f"\n{esc(rationale)}")
             final_code = result.get("final_code", "")
             if final_code:
                 flines = final_code.split("\n")
                 output.write(f"\nFinal code ({len(flines)} lines):")
                 # show first/last few lines
                 for line in flines[:8]:
-                    output.write(f"  {line}")
+                    output.write(f"  {esc(line)}")
                 if len(flines) > 10:
                     output.write(f"  ... ({len(flines) - 10} more lines)")
                     for line in flines[-2:]:
-                        output.write(f"  {line}")
+                        output.write(f"  {esc(line)}")
             files = result.get("files", [])
             if files:
                 output.write(f"\n[bold]Files: {len(files)}[/]")
                 for f in files:
-                    output.write(f"  {f.get('path', '?')}")
+                    output.write(f"  {esc(f.get('path', '?'))}")
             rag = result.get("rag_sources", [])
             if rag:
                 output.write(f"\nRAG sources: {len(rag)} chunks")
@@ -257,7 +258,7 @@ class RunScreen(Screen):
             )
 
         elif etype == "error":
-            output.write(f"\n[bold red]Pipeline error: {event.get('error', 'Unknown')}[/]")
+            output.write(f"\n[bold red]Pipeline error: {esc(event.get('error', 'Unknown'))}[/]")
 
     @property
     def session_id(self) -> str | None:

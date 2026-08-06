@@ -265,5 +265,5 @@ def _sev_color(sev: str) -> str:
 
 
 def _score_bar(score: float) -> str:
-    n = max(1, round(score * 10))
+    n = round(max(0.0, min(1.0, score)) * 10)
     return "█" * n + "░" * (10 - n)

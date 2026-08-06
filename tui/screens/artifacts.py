@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from textual.app import ComposeResult
@@ -10,6 +11,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import Button, Header, Label, ListItem, ListView, RichLog
 
+from tui import esc
 from tui.api import APIClient
 from tui.widgets.status_bar import StatusBar
 
@@ -113,8 +115,22 @@ class ArtifactScreen(Screen):
             yield fmt_btn
             yield Button("Download Archive", id="download-button", variant="primary", classes="action-button")
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         self._populate_file_list()
+        await self._load_formats()
+
+    async def _load_formats(self) -> None:
+        """Populate the format cycle from the API, falling back to the default list."""
+        try:
+            formats = await self._api_client.archive_formats()
+            if formats:
+                self._formats = formats
+                if self._selected_format not in self._formats:
+                    self._selected_format = self._formats[0]
+                button = self.query_one("#format-cycle-button", Button)
+                button.label = f" {self._selected_format} "
+        except Exception:
+            pass
 
     def _populate_file_list(self) -> None:
         file_list = self.query_one("#file-list", ListView)
@@ -133,9 +149,9 @@ class ArtifactScreen(Screen):
         lang = f.get("language", "")
         content_view = self.query_one("#content-view", RichLog)
         content_view.clear()
-        content_view.write(f"[bold]{path}[/] ({lang})")
+        content_view.write(f"[bold]{esc(path)}[/] ({esc(lang)})")
         content_view.write("")
-        content_view.write(content)
+        content_view.write(esc(content))
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "format-cycle-button":
@@ -156,8 +172,10 @@ class ArtifactScreen(Screen):
                 root="project",
             )
             fname = f"project.{self._selected_format}"
+            dest = Path.cwd() / fname
+            dest.write_bytes(data)
             self.notify(
-                f"Archive downloaded: {fname} ({len(data)} bytes)",
+                f"Archive written: {dest} ({len(data)} bytes)",
                 severity="information",
                 timeout=5,
             )

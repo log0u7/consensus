@@ -19,8 +19,8 @@ roles:
     fallback: []           # list of fallback providers tried in order
     max_tokens: 8000       # LLM budget for this role
     skills: [coding]       # list of skill names (loads skills/<name>/SKILL.md)
-    tools: []              # MCP tool names (requires mcp SDK)
-    rag_ns: ""             # RAG namespace tag (informational for now)
+    tools: []              # retrieval primitive names (reserved, not wired yet)
+    rag_ns: ""             # RAG namespace tag (declared, not wired yet)
     sandbox: false         # per-role override
 
   reviewer:                # panel role: may have 'members' instead of a single model
@@ -36,6 +36,12 @@ roles:
 
 All fields except `model` are optional. Unset fields fall back to sane defaults
 defined in `src/config.py`.
+
+> **Declarative layer status**: `skills`, `tools`, and `rag_ns` are parsed and
+> validated, but the production topologies do not call `context.build()` yet.
+> They are reserved for the upcoming zero-token retrieval executor (Cerebras
+> pattern). The only active RAG path today is the global `use_rag` flag
+> (see `docs/rag.md`).
 
 ## The three topologies
 

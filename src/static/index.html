@@ -102,6 +102,7 @@
          white-space: pre-wrap; word-wrap: break-word; }
   .msg.user { align-self: flex-end; background: var(--accent); color: #06101f; }
   .msg.lead { align-self: flex-start; background: var(--panel2); border: 1px solid var(--border); }
+  .msg-cost { align-self: flex-start; color: var(--muted); font-size: 11px; padding: 0 4px; }
   .chat-input { display: flex; gap: 8px; padding: 10px 13px; border-top: 1px solid var(--border); flex: 0 0 auto; }
   .chat-input input { flex: 1; background: var(--panel2); color: var(--fg); border: 1px solid var(--border);
                       border-radius: 6px; padding: 9px 10px; font-size: 14px; }
@@ -757,7 +758,7 @@ async function sendChat(){
     if (!res.ok || !res.body){ throw new Error("HTTP " + res.status); }
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
-    let buf = "", acc = "", streamErr = null;
+    let buf = "", acc = "", streamErr = null, usage = null;
     pending.textContent = "";
     while (true){
       const { value, done } = await reader.read();
@@ -772,10 +773,19 @@ async function sendChat(){
         let evt; try { evt = JSON.parse(line.slice(5).trim()); } catch (_){ continue; }
         if (evt.delta){ acc += evt.delta; pending.textContent = acc; $("messages").scrollTop = $("messages").scrollHeight; }
         else if (evt.error){ streamErr = evt.error; }
+        else if (evt.done){ usage = evt.usage || null; }
       }
     }
     if (streamErr) throw new Error(streamErr);
     if (!acc) pending.textContent = "(no response)";
+    if (usage){
+      const cost = document.createElement("div");
+      cost.className = "msg-cost";
+      cost.textContent = "cost: $" + ((usage.cost||0).toFixed(4))
+        + " (" + (usage.input_tokens||0) + " in / " + (usage.output_tokens||0) + " out)";
+      $("messages").appendChild(cost);
+      $("messages").scrollTop = $("messages").scrollHeight;
+    }
   } catch (e){
     // Fall back to the non-streaming endpoint once if streaming failed early.
     try { await sendChatNonStream(txt, pending); }

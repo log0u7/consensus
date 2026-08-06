@@ -156,10 +156,10 @@ test: dev-setup ## Run unit tests (local venv, offline)
 check: lint typecheck test ## Lint + typecheck + test (the CI entrypoint)
 
 .PHONY: clean
-clean: ## Remove local build/test artifacts (keeps .env and .env.active)
+clean: ## Remove local build/test artifacts (keeps .env; .env.active is regenerated)
 	rm -rf .coverage coverage.xml htmlcov .pytest_cache .mypy_cache .ruff_cache
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
-	rm -f rag.db cache.db
+	rm -f rag.db cache.db .env.active
 
 .PHONY: test-docker
 test-docker: ## Run lint+typecheck+test inside a container (iso CI env)

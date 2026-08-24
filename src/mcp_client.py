@@ -29,8 +29,27 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from urllib.parse import urlparse
 
 log = logging.getLogger(__name__)
+
+# Hosts allowed to use plain http:// for the MCP Streamable HTTP transport.
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def _validate_mcp_url(url: str) -> None:
+    """Remote MCP endpoints must use https; plain http only for loopback.
+
+    Raises ValueError on violation - a misconfigured manifest must fail loud,
+    not silently send tool traffic in cleartext.
+    """
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme != "https" and host not in _LOCAL_HOSTS:
+        raise ValueError(
+            f"MCP http transport requires https for remote hosts "
+            f"(got scheme={parsed.scheme!r} host={host!r})"
+        )
 
 
 class MCPClientManager:
@@ -56,6 +75,9 @@ class MCPClientManager:
             try:
                 if transport == "stdio":
                     cmd = cfg["command"]
+                    # Visibility: manifests spawn local processes by design;
+                    # make every spawned command auditable in logs.
+                    log.info("MCP stdio server %r starting: %s", name, cmd)
                     params = StdioServerParameters(command=cmd[0], args=cmd[1:])
                     read, write = await stdio_client(params).__aenter__()
                     session = ClientSession(read, write)
@@ -79,6 +101,7 @@ class MCPClientManager:
                             "Upgrade with: pip install 'mcp>=1.3'"
                         ) from exc
                     url = cfg["url"]
+                    _validate_mcp_url(url)
                     read, write, _ = await streamablehttp_client(url).__aenter__()
                     session = ClientSession(read, write)
                     await session.__aenter__()

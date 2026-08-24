@@ -54,6 +54,16 @@ ci(github): add Python 3.13 to test matrix
 - Never commit secrets. `.gitignore` excludes all `.env*` files except
   `.env.example`.
 - `.env.example` contains only placeholders.
+- Secret scanning runs in two places: a `gitleaks` pre-commit hook and a CI
+  job. Enable the local hook once per clone:
+
+  ```
+  pip install pre-commit
+  pre-commit install
+  ```
+
+  The hook config lives in `.pre-commit-config.yaml` (gitleaks + ruff);
+  rule exceptions live in `.gitleaks.toml`.
 
 ## Tests, lint, CI
 
@@ -69,7 +79,9 @@ make check      # lint + typecheck + test (CI entrypoint)
 
 Add tests for new pure logic. `make check` must be green before merging.
 
-CI runs three independent jobs (lint, typecheck, test) on Python 3.12 and 3.13.
+CI runs five independent jobs (lint, typecheck, test on Python 3.12 and
+3.13, security, docker-build). The security job runs `pip-audit --strict`
+on the installed environment and `gitleaks` over the full history.
 
 ## Project structure
 

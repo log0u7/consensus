@@ -101,6 +101,26 @@ jobs:
           ZEN_API_KEY: dummy
         run: pytest tests/test_sandbox.py
 
+  security:
+    name: Security (pip-audit + gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # gitleaks scans the full history
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install dev deps
+        run: pip install -q -r requirements-dev.txt
+      - name: Dependency CVE audit
+        # Audits the installed environment (direct + transitive pins).
+        run: pip-audit --strict
+      - name: Secret scan (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   docker-build:
     name: Build Docker image
     runs-on: ubuntu-latest

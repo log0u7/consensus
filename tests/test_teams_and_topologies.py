@@ -68,7 +68,7 @@ async def test_consensus_topology_emits_correct_event_types(monkeypatch):
     """The consensus topology must emit code, review(s), consensus, result."""
     from src import agents, topologies
 
-    async def fake_write_code(spec, context=""):
+    async def fake_write_code(spec, context="", provider=None, model=None):
         return {"language": "python", "code": "print(1)", "notes": "", "files": []}
 
     async def fake_review(member, code):
@@ -105,7 +105,7 @@ async def test_pipeline_streaming_uses_team(monkeypatch):
     """pipeline.run_streaming with team_name='consensus' emits a result event."""
     from src import agents, pipeline
 
-    async def fake_write_code(spec, context=""):
+    async def fake_write_code(spec, context="", provider=None, model=None):
         return {"language": "python", "code": "x=1", "notes": "", "files": []}
 
     async def fake_review(member, code):
@@ -139,6 +139,102 @@ async def test_unknown_topology_raises():
     )
     with pytest.raises(ValueError, match="Unknown topology"):
         await topologies.run(team, "spec")
+
+
+# ---------------------------------------------------------------------------
+# Governor invariant: every topology LLM call is routed through governor.call
+# ---------------------------------------------------------------------------
+
+
+def _spy_governor(monkeypatch) -> list[str]:
+    """Patch governor.call to record provider names; make_call still runs."""
+    from src import governor
+
+    seen: list[str] = []
+    real_call = governor.call
+
+    async def spy(provider_name, make_call, fallback=None, fallback_factory=None):
+        seen.append(provider_name)
+        return await real_call(
+            provider_name, make_call, fallback=fallback, fallback_factory=fallback_factory
+        )
+
+    monkeypatch.setattr(governor, "call", spy)
+    return seen
+
+
+@pytest.mark.asyncio
+async def test_pipeline_topology_routes_through_governor(monkeypatch):
+    """run_pipeline must call the governor once per role (invariant)."""
+    from src import llm, topologies
+
+    async def fake_complete(provider, model, user, system="", max_tokens=8000):
+        return "out"
+
+    monkeypatch.setattr(llm, "complete", fake_complete)
+    seen = _spy_governor(monkeypatch)
+
+    team = roles_mod.load("sre")
+    gen = await topologies.run(team, "spec", run_id="gov1")
+    [e async for e in gen]
+
+    assert len(seen) == len(team.roles)
+    assert all(p for p in seen)
+
+
+@pytest.mark.asyncio
+async def test_loop_topology_routes_through_governor(monkeypatch):
+    """run_loop must call the governor once per role per iteration (invariant)."""
+    from src import llm, topologies
+
+    async def fake_complete(provider, model, user, system="", max_tokens=8000):
+        return "working"
+
+    monkeypatch.setattr(llm, "complete", fake_complete)
+    seen = _spy_governor(monkeypatch)
+
+    team = roles_mod.load("pentest")
+    [e async for e in topologies.run_loop(team, "scan", run_id="gov2", max_iterations=2)]
+
+    assert len(seen) == len(team.roles) * 2
+
+
+@pytest.mark.asyncio
+async def test_consensus_topology_honours_coder_model_override(monkeypatch):
+    """A team manifest pinning coder.model must reach write_code."""
+    from src import agents, topologies
+
+    captured: dict = {}
+
+    async def fake_write_code(spec, context="", provider=None, model=None):
+        captured["provider"] = provider
+        captured["model"] = model
+        return {"language": "python", "code": "x=1", "notes": "", "files": []}
+
+    async def fake_review(member, code):
+        from src.models import Review
+
+        return Review(reviewer=member["name"], ok=True)
+
+    async def fake_consensus(reviews):
+        from src.models import ConsensusReport
+
+        return ConsensusReport(panel=[r.reviewer for r in reviews], summary="ok")
+
+    async def fake_verdict(spec, code, cj):
+        return {"verdict": "APPROVE", "rationale": "ok", "final_code": code, "files": []}
+
+    monkeypatch.setattr(agents, "write_code", fake_write_code)
+    monkeypatch.setattr(agents, "review_code", fake_review)
+    monkeypatch.setattr(agents, "build_consensus", fake_consensus)
+    monkeypatch.setattr(agents, "lead_verdict", fake_verdict)
+
+    team = roles_mod.load("consensus")  # pins coder: zen/deepseek-v3-0324
+    gen = await topologies.run(team, "spec", run_id="gov3")
+    [e async for e in gen]
+
+    assert captured["provider"] == "zen"
+    assert captured["model"] == "deepseek-v3-0324"
 
 
 # ---------------------------------------------------------------------------

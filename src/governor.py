@@ -16,6 +16,7 @@ Usage:
 
 import logging
 from collections.abc import Awaitable, Callable
+from contextlib import asynccontextmanager
 
 import httpx
 
@@ -64,8 +65,10 @@ except ImportError:
 
 
 def _is_retryable(exc: BaseException) -> bool:
-    if isinstance(exc, httpx.HTTPStatusError):
-        return exc.response.status_code in config.RATE_LIMIT_RETRY_STATUSES
+    # HTTP-status retries (429/503) belong to the transport layer
+    # (llm._post_with_retry), the only place that honours Retry-After.
+    # Retrying them here too would multiply attempts ((N+1)^2 per provider).
+    # The governor retries connection-level failures and owns fallback.
     return isinstance(exc, (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError))
 
 
@@ -88,9 +91,21 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 
+@asynccontextmanager
+async def rpm(provider_name: str):
+    """Explicitly acquire a provider's rate-limit slot (RPM cap).
+
+    For streaming calls that cannot be retried mid-stream but must still
+    respect the per-provider rate limit. governor.call() acquires this
+    internally; only direct streaming paths need to use it.
+    """
+    async with _limiter(provider_name):
+        yield
+
+
 async def _call_once(provider_name: str, make_call: Callable[[], Awaitable[str]]) -> str:
     """Acquire a rate-limit slot then execute make_call with tenacity retry."""
-    async with _limiter(provider_name):
+    async with rpm(provider_name):
         if _HAS_TENACITY:
             async for attempt in AsyncRetrying(
                 retry=retry_if_exception(_is_retryable),

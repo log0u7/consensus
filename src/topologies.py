@@ -85,14 +85,12 @@ async def run_consensus(
         coder_role = team.roles.get("coder")
         reviewer_role = team.roles.get("reviewer")
 
-        # Override quota model refs from team manifest when present.
+        # 1. Code (team manifest may pin the coder model; otherwise quota decides)
         if coder_role and coder_role.model:
             prov, mod = coder_role.model.split("/", 1)
+            coded = await agents.write_code(spec, context, provider=prov, model=mod)
         else:
-            prov, mod = quota.coder_model()
-
-        # 1. Code
-        coded = await agents.write_code(spec, context)
+            coded = await agents.write_code(spec, context)
         code = coded["code"]
         rlog("info", "coder done (%.1fs)", time.perf_counter() - t0)
         yield {
@@ -107,14 +105,9 @@ async def run_consensus(
         sandbox_context = ""
         if coder_role and coder_role.sandbox and coded["files"]:
             rlog("info", "sandbox: executing generated code")
-            import sys as _sys
-
-            _pyexe = _sys.executable
             exec_result = await sandbox_mod.run(
                 coded["files"],
-                cmd=f"{_pyexe} {coded['files'][0].path}"
-                if coded["files"]
-                else f"{_pyexe} -c 'pass'",
+                cmd=f"{sandbox_mod.SANDBOX_PYTHON} {coded['files'][0].path}",
             )
             sandbox_context = exec_result.as_context()
             rlog(
@@ -251,8 +244,12 @@ async def run_pipeline(
 
             tok = llm.set_step(role_name)
             try:
-                output = await llm.complete(
-                    prov, mod, user, max_tokens=role.max_tokens or config.CODER_MAX_TOKENS
+                output = await agents.governed_call(
+                    prov,
+                    mod,
+                    user,
+                    max_tokens=role.max_tokens or config.CODER_MAX_TOKENS,
+                    fallback=config.CODER_FALLBACK,
                 )
             finally:
                 llm.reset_step(tok)
@@ -321,8 +318,12 @@ async def run_loop(
                 )
                 tok = llm.set_step(f"{role_name}:{i}")
                 try:
-                    output = await llm.complete(
-                        prov, mod, user, max_tokens=role.max_tokens or config.CODER_MAX_TOKENS
+                    output = await agents.governed_call(
+                        prov,
+                        mod,
+                        user,
+                        max_tokens=role.max_tokens or config.CODER_MAX_TOKENS,
+                        fallback=config.CODER_FALLBACK,
                     )
                 finally:
                     llm.reset_step(tok)

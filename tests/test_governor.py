@@ -1,5 +1,6 @@
 """Tests for governor.py: rate-limit, retry, fallback chain."""
 
+import httpx
 import pytest
 from src import governor, quota
 
@@ -72,3 +73,51 @@ async def test_call_no_fallback_raises():
 
     with pytest.raises(ValueError, match="boom"):
         await governor.call("zen", fail)
+
+
+# ---------------------------------------------------------------------------
+# Retry layering: HTTP-status retries belong to the transport only
+# ---------------------------------------------------------------------------
+
+
+def test_is_retryable_connection_errors():
+    assert governor._is_retryable(httpx.ConnectError("refused")) is True
+    assert governor._is_retryable(httpx.ReadTimeout("slow")) is True
+    assert governor._is_retryable(httpx.RemoteProtocolError("reset")) is True
+
+
+def test_is_retryable_http_status_not_retried():
+    """429/503 are retried by llm._post_with_retry (honours Retry-After);
+    the governor must not retry them again on top."""
+    req = httpx.Request("POST", "http://x")
+    for status in config_retry_statuses():
+        exc = httpx.HTTPStatusError(
+            f"{status}", request=req, response=httpx.Response(status, request=req)
+        )
+        assert governor._is_retryable(exc) is False, status
+    # Non-retryable statuses are equally not governor-retried
+    exc = httpx.HTTPStatusError("500", request=req, response=httpx.Response(500, request=req))
+    assert governor._is_retryable(exc) is False
+
+
+def test_is_retryable_other_exceptions():
+    assert governor._is_retryable(RuntimeError("boom")) is False
+    assert governor._is_retryable(ValueError("bad json")) is False
+
+
+def config_retry_statuses():
+    from src import config
+
+    return sorted(config.RATE_LIMIT_RETRY_STATUSES)
+
+
+# ---------------------------------------------------------------------------
+# rpm(): explicit rate-limit acquisition (streaming paths)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_rpm_acquires_and_releases():
+    async with governor.rpm("zen"):
+        inside = True
+    assert inside

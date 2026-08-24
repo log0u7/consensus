@@ -109,6 +109,12 @@ async def run_consensus(
                 coded["files"],
                 cmd=f"{sandbox_mod.SANDBOX_PYTHON} {coded['files'][0].path}",
             )
+            if exec_result.skipped:
+                rlog(
+                    "warning",
+                    "sandbox requested but skipped (engine=%s): generated code was NOT executed",
+                    exec_result.engine,
+                )
             sandbox_context = exec_result.as_context()
             rlog(
                 "info",

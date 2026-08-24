@@ -212,7 +212,11 @@ async def provider_reachable(provider_name: str, timeout: float = 5.0) -> dict:
             r = await c.get("/models")
             return {"reachable": True, "status": r.status_code, "error": None}
     except Exception as exc:  # noqa: BLE001
-        return {"reachable": False, "status": None, "error": f"{type(exc).__name__}: {exc}"}
+        # Exception text can embed internal base URLs; keep it in logs only.
+        logging.getLogger(__name__).warning(
+            "provider probe failed: %s: %s", type(exc).__name__, exc
+        )
+        return {"reachable": False, "status": None, "error": type(exc).__name__}
 
 
 # ---------------------------------------------------------------------------

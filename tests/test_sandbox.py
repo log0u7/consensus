@@ -115,6 +115,64 @@ async def test_subprocess_sandbox_timeout():
 
 
 # ---------------------------------------------------------------------------
+# SubprocessSandbox resource limits (shell ulimit guards)
+# ---------------------------------------------------------------------------
+
+
+def test_mem_limit_bytes_parses_suffixes():
+    from src.sandbox import _mem_limit_bytes
+
+    assert _mem_limit_bytes("256m") == 256 * 1024**2
+    assert _mem_limit_bytes("1g") == 1024**3
+    assert _mem_limit_bytes("65536k") == 64 * 1024**2
+    assert _mem_limit_bytes("1024") == 1024
+
+
+def test_wrap_cmd_contains_ulimit_guards():
+    s = SubprocessSandbox()
+    wrapped = s._wrap_cmd(
+        "python3 x.py", SandboxLimits(timeout=30, mem_limit="256m", cpu_quota=50000)
+    )
+    # AS cap: 2x mem_limit in KiB (512 MiB -> 524288 KiB)
+    assert "ulimit -v 524288" in wrapped
+    # CPU seconds: timeout x cpu_quota/100000 -> 30 * 0.5 = 15
+    assert "ulimit -t 15" in wrapped
+    # File size: 64 MB in 512-byte blocks
+    assert "ulimit -f 131072" in wrapped
+    assert "exec python3 x.py" in wrapped
+
+
+def test_wrap_cmd_quotes_tokens():
+    s = SubprocessSandbox()
+    wrapped = s._wrap_cmd('py "my file.py"', SandboxLimits(timeout=10))
+    assert "'my file.py'" in wrapped
+
+
+@pytest.mark.asyncio
+async def test_subprocess_sandbox_enforces_memory_cap():
+    """A process allocating beyond the address-space cap must fail."""
+    s = SubprocessSandbox()
+    code = "b = bytearray(600 * 1024 * 1024)\nprint('allocated')"
+    files = [Artifact(path="big.py", language="python", content=code)]
+    r = await s.run(files, _PYTHON + " big.py", SandboxLimits(timeout=20))
+    assert r.exit_code != 0
+
+
+@pytest.mark.asyncio
+async def test_subprocess_sandbox_enforces_file_size_cap():
+    """Writing a file larger than SANDBOX_FSIZE_MB must fail (SIGXFSZ)."""
+    s = SubprocessSandbox()
+    code = (
+        "with open('blob.bin', 'wb') as f:\n"
+        "    f.write(b'x' * (70 * 1024 * 1024))\n"
+        "print('written')"
+    )
+    files = [Artifact(path="writer.py", language="python", content=code)]
+    r = await s.run(files, _PYTHON + " writer.py", SandboxLimits(timeout=30))
+    assert r.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
 # DockerSandbox (skipped when Docker is absent)
 # ---------------------------------------------------------------------------
 

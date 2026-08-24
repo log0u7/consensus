@@ -11,6 +11,7 @@ has no application-level auth. CORS is restricted to ALLOWED_ORIGINS.
 
 import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator
 
 from fastapi import FastAPI, HTTPException
@@ -24,6 +25,8 @@ from .models import Artifact, CostSummary, PipelineResult
 from .sessions import store
 
 config.setup_logging()
+
+log = logging.getLogger(__name__)
 
 app = FastAPI(title="Consensus")
 
@@ -51,7 +54,8 @@ async def with_heartbeat(gen: AsyncIterator[str]) -> AsyncIterator[str]:
             async for chunk in gen:
                 await queue.put(("data", chunk))
         except Exception as exc:  # noqa: BLE001 - surface as an SSE error event
-            await queue.put(("error", f"{type(exc).__name__}: {exc}"))
+            log.warning("SSE stream failed: %s: %s", type(exc).__name__, exc)
+            await queue.put(("error", type(exc).__name__))
         finally:
             await queue.put(("done", _DONE))
 
@@ -114,7 +118,9 @@ class RegenResponse(BaseModel):
 class ArchiveRequest(BaseModel):
     files: list[Artifact] = Field(min_length=1)
     format: str = "zip"
-    root: str = "project"
+    # Constrained: root lands in the Content-Disposition filename, so no
+    # path separators or control characters (header injection).
+    root: str = Field(default="project", pattern=r"^[A-Za-z0-9._-]{1,64}$")
 
 
 # Limit concurrent runs (seamless: extra runs wait their turn). The semaphore
@@ -174,7 +180,8 @@ async def api_run_stream(req: RunRequest):
                         event["session_id"] = _seed_session(result)
                     yield f"data: {json.dumps(event)}\n\n"
         except Exception as exc:  # noqa: BLE001
-            yield f"data: {json.dumps({'type': 'error', 'error': f'{type(exc).__name__}: {exc}'})}\n\n"
+            log.warning("run stream failed: %s: %s", type(exc).__name__, exc)
+            yield f"data: {json.dumps({'type': 'error', 'error': type(exc).__name__})}\n\n"
 
     return StreamingResponse(
         with_heartbeat(gen()), media_type="text/event-stream", headers=SSE_HEADERS
@@ -193,6 +200,9 @@ async def api_chat(req: ChatRequest):
     try:
         with llm.usage_scope() as usages:
             reply = await agents.lead_chat(sess["system"], sess["history"])
+    except Exception as exc:
+        log.warning("chat failed: %s: %s", type(exc).__name__, exc)
+        raise HTTPException(status_code=502, detail="upstream provider error") from exc
     finally:
         llm.reset_step(tok)
     sess["history"].append({"role": "assistant", "content": reply})
@@ -233,7 +243,8 @@ async def api_chat_stream(req: ChatRequest):
             # Client went away: propagate after the finally block has cleaned up.
             raise
         except Exception as exc:  # noqa: BLE001
-            yield f"data: {json.dumps({'error': f'{type(exc).__name__}: {exc}'})}\n\n"
+            log.warning("chat stream failed: %s: %s", type(exc).__name__, exc)
+            yield f"data: {json.dumps({'error': type(exc).__name__})}\n\n"
         finally:
             # Roll back the unanswered user turn so a retry is coherent. This
             # also covers cancellation, which `except Exception` never sees.

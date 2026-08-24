@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Docker sandbox hardening**: `--cap-drop ALL`, `--security-opt
+  no-new-privileges`, `--pids-limit 128` and `--user <host-uid:gid>`
+  (unprivileged container user) added to `DockerSandbox`; the docstring's
+  invariants are now all enforced in the actual argv. Pure `_docker_args()`
+  builder is unit-tested.
+- **Sandbox skip visibility**: when a role requests `sandbox: true` but the
+  execution is skipped (e.g. docker missing), a warning is logged into the
+  run events ("generated code was NOT executed").
+
+### Fixed
+
+- **Header injection**: `/api/archive` `root` field is now constrained to
+  `[A-Za-z0-9._-]{1,64}` before landing in the `Content-Disposition`
+  filename.
+- **Client-facing error leakage**: SSE error events, chat failures and the
+  provider health probe now return only the exception type name; full
+  exception details (which can embed internal base URLs) go to server logs.
+
 ### Changed
 
 - **Retry layering**: HTTP-status retries (429/503) are now owned solely by

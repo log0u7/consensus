@@ -148,6 +148,29 @@ def test_wrap_cmd_quotes_tokens():
     assert "'my file.py'" in wrapped
 
 
+def test_docker_args_contain_hardening_flags():
+    """The documented invariants must appear in the actual docker argv."""
+    s = DockerSandbox()
+    args = s._docker_args("/tmp/ws", SandboxLimits(), "python3 hi.py")
+    for expected in [
+        "--network",
+        "none",
+        "--read-only",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges",
+        "--pids-limit",
+        "128",
+        "--user",
+        "--memory",
+        "--cpu-quota",
+    ]:
+        assert expected in args, expected
+    # Workspace is mounted read-only.
+    assert "/tmp/ws:/workspace:ro" in args
+
+
 @pytest.mark.asyncio
 async def test_subprocess_sandbox_enforces_memory_cap():
     """A process allocating beyond the address-space cap must fail."""

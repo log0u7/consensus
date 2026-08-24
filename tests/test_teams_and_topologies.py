@@ -237,6 +237,53 @@ async def test_consensus_topology_honours_coder_model_override(monkeypatch):
     assert captured["model"] == "deepseek-v3-0324"
 
 
+@pytest.mark.asyncio
+async def test_consensus_topology_warns_when_sandbox_skipped(monkeypatch, caplog):
+    """A requested sandbox that silently skips must surface a warning."""
+    import logging
+
+    from src import agents, topologies
+    from src import sandbox as sandbox_mod
+    from src.models import Artifact
+
+    async def fake_write_code(spec, context="", provider=None, model=None):
+        return {
+            "language": "python",
+            "code": "x=1",
+            "notes": "",
+            "files": [Artifact(path="main.py", language="python", content="x=1")],
+        }
+
+    async def fake_run(files, cmd, limits=None):
+        return sandbox_mod.SandboxResult(skipped=True, engine="docker-missing")
+
+    async def fake_review(member, code):
+        from src.models import Review
+
+        return Review(reviewer=member["name"], ok=True)
+
+    async def fake_consensus(reviews):
+        from src.models import ConsensusReport
+
+        return ConsensusReport(panel=[r.reviewer for r in reviews], summary="ok")
+
+    async def fake_verdict(spec, code, cj):
+        return {"verdict": "APPROVE", "rationale": "ok", "final_code": code, "files": []}
+
+    monkeypatch.setattr(agents, "write_code", fake_write_code)
+    monkeypatch.setattr(agents, "review_code", fake_review)
+    monkeypatch.setattr(agents, "build_consensus", fake_consensus)
+    monkeypatch.setattr(agents, "lead_verdict", fake_verdict)
+    monkeypatch.setattr(sandbox_mod, "run", fake_run)
+
+    team = roles_mod.load("consensus-tested")  # coder.sandbox is true
+    with caplog.at_level(logging.WARNING, logger="src.topologies"):
+        gen = await topologies.run(team, "spec", run_id="skipwarn")
+        [e async for e in gen]
+
+    assert any("NOT executed" in rec.getMessage() for rec in caplog.records)
+
+
 # ---------------------------------------------------------------------------
 # Topology: pipeline  (sequential planner -> executor -> verifier)
 # ---------------------------------------------------------------------------

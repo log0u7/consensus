@@ -117,6 +117,7 @@ LLM-generated code in a shared or network-accessible environment.
 - Input sizes capped before any billable call.
 - Zip-slip protection in `models.sanitize_path` and `archive._validated`.
 - Never commit secrets; only `.env.example` is tracked.
+- Full posture, accepted risks and persistence notes: see `SECURITY.md`.
 
 ## Do / don't
 

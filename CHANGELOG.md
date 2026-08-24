@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Prompt-injection delimiting**: RAG chunks are wrapped in
+  `<untrusted source=rag>` markers and skill files in
+  `<untrusted source="skills">` inside prompts, so retrieved third-party
+  text is framed as data, not instructions.
+- **MCP hardening**: Streamable HTTP transports require `https` for remote
+  hosts (plain `http` restricted to loopback, misconfiguration fails loud);
+  every stdio server command is logged for auditability.
+- **Security documentation**: new `SECURITY.md` describing the loopback
+  no-auth posture, sandbox guarantees/limits, prompt-injection surface,
+  persistence locations and supply-chain controls.
+
+### Added
+
 - **Supply chain**: exact `==` pins for all runtime and dev dependencies
   (versions taken from the tested venv); `pip-audit` added to dev deps and a
   CI `security` job running `pip-audit --strict` plus `gitleaks` over the

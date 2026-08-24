@@ -40,6 +40,31 @@ def files_to_blob(files: list[Artifact]) -> str:
     return "\n\n".join(f"# ===== {f.path} =====\n{f.content}" for f in files)
 
 
+async def governed_call(
+    provider: str,
+    model: str,
+    user: str,
+    system: str | None = None,
+    max_tokens: int = 4096,
+    fallback: list[str] | None = None,
+) -> str:
+    """One LLM call routed through the governor (rate-limit + retry + fallback).
+
+    Single source of truth for topology role steps; agents must never call
+    llm.complete() directly.
+    """
+
+    def _make(prov: str) -> Awaitable[str]:
+        return llm.complete(prov, model, user, system=system, max_tokens=max_tokens)
+
+    return await governor.call(
+        provider,
+        lambda: _make(provider),
+        fallback=fallback,
+        fallback_factory=lambda p: lambda: _make(p),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Coder
 # ---------------------------------------------------------------------------
@@ -57,9 +82,17 @@ _CODER_SYS = (
 )
 
 
-async def write_code(spec: str, context: str = "") -> dict:
+async def write_code(
+    spec: str,
+    context: str = "",
+    provider: str | None = None,
+    model: str | None = None,
+) -> dict:
+    """Coder step. provider/model override the quota profile (team manifest);
+    when either is missing the quota profile decides."""
     user = spec if not context else f"Internal context:\n{context}\n\nTask:\n{spec}"
-    provider, model = quota.coder_model()
+    if provider is None or model is None:
+        provider, model = quota.coder_model()
     tok = llm.set_step("coder")
     try:
 
@@ -347,12 +380,19 @@ async def lead_regen_artifacts(system: str, history: list[dict[str, str]]) -> li
     tok = llm.set_step("chat")
     try:
 
-        def _make_call(attempt: int):
+        def _make(prov: str, attempt: int) -> Awaitable[str]:
             instr = _LEAD_REGEN_INSTR + (llm._JSON_RETRY_HINT if attempt else "")
             messages = _with_system(system, list(history) + [{"role": "user", "content": instr}])
-            return llm.complete_history(provider, model, messages, config.LEAD_MAX_TOKENS)
+            return llm.complete_history(prov, model, messages, config.LEAD_MAX_TOKENS)
 
-        data = await llm.complete_json_obj(_make_call)
+        data = await llm.complete_json_obj(
+            lambda attempt: governor.call(
+                provider,
+                lambda: _make(provider, attempt),
+                fallback=config.LEAD_FALLBACK,
+                fallback_factory=lambda p: lambda: _make(p, attempt),
+            )
+        )
     finally:
         llm.reset_step(tok)
     return _parse_files(data.get("files"))
@@ -361,30 +401,56 @@ async def lead_regen_artifacts(system: str, history: list[dict[str, str]]) -> li
 async def lead_chat(system: str, history: list[dict[str, str]]) -> str:
     """Free-form conversation with the Lead (full history, all transports)."""
     provider, model = quota.lead_model()
-    # Anthropic transport uses system as a top-level parameter; openai-compatible
-    # transports embed the system message as the first message in the list.
-    if provider == "anthropic":
-        return await llm.call_anthropic_history(
-            model, history, system=system, max_tokens=config.CHAT_MAX_TOKENS
+
+    def _make(prov: str) -> Awaitable[str]:
+        # Anthropic transport takes system as a top-level parameter;
+        # openai-compatible transports embed it as the first message.
+        if prov == "anthropic":
+            return llm.call_anthropic_history(
+                model, history, system=system, max_tokens=config.CHAT_MAX_TOKENS
+            )
+        return llm.complete_history(
+            prov, model, _with_system(system, history), config.CHAT_MAX_TOKENS
         )
-    # Prepend system as a system message for openai-compatible providers.
-    messages = _with_system(system, history)
-    return await llm.complete_history(provider, model, messages, config.CHAT_MAX_TOKENS)
+
+    return await governor.call(
+        provider,
+        lambda: _make(provider),
+        fallback=config.LEAD_FALLBACK,
+        fallback_factory=lambda p: lambda: _make(p),
+    )
 
 
 def lead_chat_stream(system: str, history: list[dict[str, str]]):
     """Streaming variant of lead_chat: async iterator of text deltas.
-    Anthropic uses native SSE streaming; other providers emit one chunk."""
+    Anthropic uses native SSE streaming; other providers emit one chunk.
+    Streaming cannot retry mid-stream, so the Anthropic path only acquires
+    the provider's rate-limit slot (governor.rpm)."""
     provider, model = quota.lead_model()
     if provider == "anthropic":
-        return llm.call_anthropic_history_stream(
-            model, history, system=system, max_tokens=config.CHAT_MAX_TOKENS
-        )
-    # Non-Anthropic: full history, wrapped as an async generator.
+
+        async def _anthropic_stream():
+            async with governor.rpm("anthropic"):
+                async for delta in llm.call_anthropic_history_stream(
+                    model, history, system=system, max_tokens=config.CHAT_MAX_TOKENS
+                ):
+                    yield delta
+
+        return _anthropic_stream()
+
+    # Non-Anthropic: full history through the governor, wrapped as a generator.
     messages = _with_system(system, history)
 
+    def _make(prov: str) -> Awaitable[str]:
+        return llm.complete_history(prov, model, messages, config.CHAT_MAX_TOKENS)
+
     async def _wrap():
-        result = await llm.complete_history(provider, model, messages, config.CHAT_MAX_TOKENS)
+        result = await governor.call(
+            provider,
+            lambda: _make(provider),
+            fallback=config.LEAD_FALLBACK,
+            fallback_factory=lambda p: lambda: _make(p),
+        )
         yield result
 
     return _wrap()

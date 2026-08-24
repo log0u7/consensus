@@ -10,7 +10,7 @@ async def test_run_streaming_logs_run_id(monkeypatch, caplog):
     """Pipeline emits a result event and logs are prefixed with the run_id."""
     from src import agents, pipeline
 
-    async def fake_write_code(spec, context=""):
+    async def fake_write_code(spec, context="", provider=None, model=None):
         return {"language": "python", "code": "print(1)", "notes": "", "files": []}
 
     async def fake_review(member, code):

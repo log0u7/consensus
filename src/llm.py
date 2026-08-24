@@ -49,9 +49,10 @@ def _client(provider: config.Provider) -> httpx.AsyncClient:
 # ---------------------------------------------------------------------------
 # Retry helper (rate-limit / transient errors)
 # Exponential backoff with jitter, honouring Retry-After.
-# The governor (governor.py) adds aiolimiter + tenacity on top; this is the
-# low-level transport retry kept here for simplicity when calling outside a
-# governed context (e.g. streaming chat).
+# This is the ONLY layer that retries HTTP-status errors (429/503): it sees
+# the Retry-After header, which tenacity cannot. The governor (governor.py)
+# adds aiolimiter RPM + fallback on top and retries only connection-level
+# failures, so attempts never multiply ((N+1)^2) across layers.
 # ---------------------------------------------------------------------------
 
 

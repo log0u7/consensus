@@ -26,6 +26,17 @@ def _make_fake_json_obj(return_value: dict):
     return _fake
 
 
+def _make_invoking_fake_json_obj(return_value: dict):
+    """Like _make_fake_json_obj but consumes make_call once, so wrapped layers
+    (governor.call) are actually exercised."""
+
+    async def _fake(make_call, retries=2):
+        await make_call(0)
+        return return_value
+
+    return _fake
+
+
 # ---------------------------------------------------------------------------
 # write_code
 # ---------------------------------------------------------------------------
@@ -365,3 +376,141 @@ async def test_lead_verdict_multi_file(monkeypatch):
     result = await agents.lead_verdict("spec", "code", "{}")
     assert len(result["files"]) == 2
     assert result["files"][0].path == "app.py"
+
+
+# ---------------------------------------------------------------------------
+# Governor invariant: write_code override + governed chat paths
+# ---------------------------------------------------------------------------
+
+
+def _spy_governor_call(monkeypatch) -> list[str]:
+    """Patch agents.governor.call to record providers; make_call still runs."""
+    seen: list[str] = []
+
+    async def spy(provider_name, make_call, fallback=None, fallback_factory=None):
+        seen.append(provider_name)
+        return await make_call()
+
+    monkeypatch.setattr(agents.governor, "call", spy)
+    return seen
+
+
+@pytest.mark.asyncio
+async def test_write_code_explicit_provider_skips_quota(monkeypatch):
+    quota_called = {"v": False}
+
+    def fake_coder_model():
+        quota_called["v"] = True
+        return ("zen", "should-not-be-used")
+
+    received = {}
+
+    async def fake_complete(provider, model, user, system="", max_tokens=4096):
+        received["provider"] = provider
+        received["model"] = model
+        return "raw"
+
+    monkeypatch.setattr(agents.quota, "coder_model", fake_coder_model)
+    monkeypatch.setattr(agents.llm, "complete", fake_complete)
+    monkeypatch.setattr(
+        agents.llm,
+        "complete_json_obj",
+        _make_invoking_fake_json_obj({"language": "python", "code": "x=1", "notes": ""}),
+    )
+    seen = _spy_governor_call(monkeypatch)
+
+    await agents.write_code("spec", provider="local", model="m1")
+    assert seen == ["local"]
+    assert received == {"provider": "local", "model": "m1"}
+    assert quota_called["v"] is False
+
+
+@pytest.mark.asyncio
+async def test_write_code_without_override_uses_quota(monkeypatch):
+    async def fake_complete(provider, model, user, system="", max_tokens=4096):
+        return "raw"
+
+    monkeypatch.setattr(agents.llm, "complete", fake_complete)
+    monkeypatch.setattr(
+        agents.llm,
+        "complete_json_obj",
+        _make_invoking_fake_json_obj({"language": "python", "code": "x=1", "notes": ""}),
+    )
+    seen = _spy_governor_call(monkeypatch)
+
+    await agents.write_code("spec")
+    # Provider came from the quota profile (default CODER_MODEL -> zen)
+    assert seen == ["zen"]
+
+
+@pytest.mark.asyncio
+async def test_lead_regen_artifacts_routes_through_governor(monkeypatch):
+    async def fake_complete_history(prov, model, messages, max_tokens=4096):
+        return '{"files": [{"path": "a.py", "language": "python", "content": "x"}]}'
+
+    monkeypatch.setattr(agents.llm, "complete_history", fake_complete_history)
+    monkeypatch.setattr(
+        agents.llm,
+        "complete_json_obj",
+        _make_invoking_fake_json_obj(
+            {"files": [{"path": "a.py", "language": "python", "content": "x"}]}
+        ),
+    )
+    seen = _spy_governor_call(monkeypatch)
+
+    files = await agents.lead_regen_artifacts("sys", [{"role": "user", "content": "hi"}])
+    assert len(seen) == 1
+    assert files[0].path == "a.py"
+
+
+@pytest.mark.asyncio
+async def test_lead_chat_routes_through_governor(monkeypatch):
+    async def fake_complete_history(prov, model, messages, max_tokens=4096):
+        return "reply"
+
+    monkeypatch.setattr(agents.llm, "complete_history", fake_complete_history)
+    seen = _spy_governor_call(monkeypatch)
+
+    reply = await agents.lead_chat("sys", [{"role": "user", "content": "hi"}])
+    assert reply == "reply"
+    assert len(seen) == 1
+
+
+@pytest.mark.asyncio
+async def test_lead_chat_stream_anthropic_uses_rpm(monkeypatch):
+    """Anthropic streaming cannot retry mid-stream: it must still acquire
+    the provider rate-limit slot via governor.rpm."""
+    import contextlib
+
+    rpm_used = {"v": False}
+
+    @contextlib.asynccontextmanager
+    async def fake_rpm(name):
+        rpm_used["v"] = True
+        yield
+
+    async def fake_stream(model, history, system=None, max_tokens=4096):
+        yield "a"
+        yield "b"
+
+    monkeypatch.setattr(agents.quota, "lead_model", lambda: ("anthropic", "claude-x"))
+    monkeypatch.setattr(agents.governor, "rpm", fake_rpm)
+    monkeypatch.setattr(agents.llm, "call_anthropic_history_stream", fake_stream)
+
+    out = [d async for d in agents.lead_chat_stream("sys", [])]
+    assert out == ["a", "b"]
+    assert rpm_used["v"] is True
+
+
+@pytest.mark.asyncio
+async def test_lead_chat_stream_non_anthropic_governed(monkeypatch):
+    async def fake_complete_history(prov, model, messages, max_tokens=4096):
+        return "chunk"
+
+    monkeypatch.setattr(agents.quota, "lead_model", lambda: ("zen", "m"))
+    monkeypatch.setattr(agents.llm, "complete_history", fake_complete_history)
+    seen = _spy_governor_call(monkeypatch)
+
+    out = [d async for d in agents.lead_chat_stream("sys", [])]
+    assert out == ["chunk"]
+    assert len(seen) == 1

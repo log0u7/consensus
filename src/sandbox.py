@@ -37,10 +37,29 @@ SANDBOX_ENGINE = os.environ.get("SANDBOX_ENGINE", "docker").lower()
 # Docker image used for sandboxed execution. Override with SANDBOX_IMAGE.
 SANDBOX_IMAGE = os.environ.get("SANDBOX_IMAGE", "python:3.12-slim")
 
+# Interpreter used to run generated code inside the sandbox. Must name an
+# interpreter that exists IN the sandbox environment, not on the host
+# (sys.executable points at the host venv and usually does not exist in the
+# container). Override with SANDBOX_PYTHON.
+SANDBOX_PYTHON = os.environ.get("SANDBOX_PYTHON", "python3")
+
+# Max bytes a sandboxed process may write to any single file (ulimit -f).
+SANDBOX_FSIZE_MB = int(os.environ.get("SANDBOX_FSIZE_MB", "64"))
+
 # Default resource limits.
 DEFAULT_TIMEOUT = int(os.environ.get("SANDBOX_TIMEOUT", "30"))  # seconds
 DEFAULT_MEM_LIMIT = os.environ.get("SANDBOX_MEM_LIMIT", "256m")
 DEFAULT_CPU_QUOTA = int(os.environ.get("SANDBOX_CPU_QUOTA", "50000"))  # 50% of 1 CPU
+
+_MEM_SUFFIX = {"k": 1024, "m": 1024**2, "g": 1024**3}
+
+
+def _mem_limit_bytes(value: str) -> int:
+    """Parse a docker-style memory limit ("256m") into bytes."""
+    v = value.strip().lower()
+    if v and v[-1] in _MEM_SUFFIX:
+        return int(v[:-1]) * _MEM_SUFFIX[v[-1]]
+    return int(v)
 
 
 @dataclass
@@ -185,9 +204,33 @@ class DockerSandbox(Sandbox):
 class SubprocessSandbox(Sandbox):
     """Execute code in a local subprocess with a temporary working directory.
 
-    WARNING: provides NO real isolation. Suitable only for trusted code or
-    local development. Do NOT use with untrusted LLM-generated code.
+    Resource-bounded but NOT isolated: shell ulimits cap address space,
+    CPU seconds and per-file size, and the caller-side timeout kills stuck
+    runs. The process can still read host files, open network sockets and
+    see inherited environment. Suitable only for trusted code or local
+    development. Do NOT use with untrusted LLM-generated code.
     """
+
+    def _wrap_cmd(self, cmd: str, limits: SandboxLimits) -> str:
+        """Wrap cmd in `sh -c` with ulimit guards, then exec the payload.
+
+        - ulimit -v : address space in KiB; 2x the docker-style limit because
+          RLIMIT_AS counts reserved virtual memory (CPython reserves more
+          than resident).
+        - ulimit -t : cumulative CPU seconds derived from timeout x cpu_quota.
+        - ulimit -f : max file size in 512-byte blocks.
+        Tokens are re-quoted with shlex.quote so nothing is interpreted twice.
+        """
+        as_kib = max(_mem_limit_bytes(limits.mem_limit) * 2 // 1024, 65536)
+        cpu_seconds = max(1, int(limits.timeout * limits.cpu_quota / 100000))
+        fsize_blocks = SANDBOX_FSIZE_MB * 2048
+        inner = " ".join(shlex.quote(t) for t in shlex.split(cmd))
+        return (
+            f"ulimit -v {as_kib} && "
+            f"ulimit -t {cpu_seconds} && "
+            f"ulimit -f {fsize_blocks} && "
+            f"exec {inner}"
+        )
 
     async def run(
         self,
@@ -196,7 +239,10 @@ class SubprocessSandbox(Sandbox):
         limits: SandboxLimits | None = None,
     ) -> SandboxResult:
         lim = limits or SandboxLimits()
-        log.warning("SubprocessSandbox: NO isolation - use DockerSandbox for untrusted code")
+        log.warning(
+            "SubprocessSandbox: resource-limited but NO isolation - "
+            "use DockerSandbox for untrusted code"
+        )
 
         with tempfile.TemporaryDirectory() as tmpdir:
             for f in files:
@@ -206,7 +252,9 @@ class SubprocessSandbox(Sandbox):
 
             try:
                 proc = await asyncio.create_subprocess_exec(
-                    *shlex.split(cmd),
+                    "/bin/sh",
+                    "-c",
+                    self._wrap_cmd(cmd, lim),
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     cwd=tmpdir,

@@ -21,7 +21,7 @@ from src.models import ConsensusReport, CostSummary, PipelineResult, Usage  # no
 def _patch_agents(monkeypatch):
     """Monkeypatch all four agent functions with fast fakes."""
 
-    async def fake_write_code(spec, context=""):
+    async def fake_write_code(spec, context="", provider=None, model=None):
         return {"language": "python", "code": "x = 1", "notes": "", "files": []}
 
     async def fake_review(member, code):

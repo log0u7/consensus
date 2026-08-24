@@ -123,12 +123,60 @@ class DockerSandbox(Sandbox):
     - --tmpfs /tmp         : writable tmpfs for the workdir
     - --memory             : hard memory cap
     - --cpu-quota          : CPU cap
+    - --cap-drop ALL       : no Linux capabilities
     - --no-new-privileges  : prevent privilege escalation
+    - --pids-limit         : fork-bomb guard
+    - --user               : unprivileged (host uid) inside the container
     - no secrets mounted   : caller must not pass secrets in Artifact content
     """
 
     def __init__(self, image: str = SANDBOX_IMAGE) -> None:
         self.image = image
+
+    def _docker_args(self, tmpdir: str, lim: SandboxLimits, cmd: str) -> list[str]:
+        """Build the docker run argv. Pure: unit-testable without Docker.
+
+        Hardening (keep in sync with the class docstring):
+        - --network none            : no outbound network
+        - --read-only               : root filesystem read-only
+        - --cap-drop ALL            : drop every Linux capability
+        - --security-opt no-new-privileges : block privilege escalation
+        - --pids-limit              : fork-bomb guard
+        - --user <host-uid:gid>     : unprivileged container user (also lets it
+          traverse the 0700 temp dir once DAC_OVERRIDE is dropped)
+        - --tmpfs /tmp              : writable tmpfs for /tmp only
+        - --memory / --cpu-quota    : resource caps
+        - workspace mounted :ro     : LLM files are inputs, never writable
+        - no secrets passed         : caller must not embed secrets in Artifacts
+        """
+        return [
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--pids-limit",
+            "128",
+            "--user",
+            f"{os.getuid()}:{os.getgid()}",
+            "--tmpfs",
+            "/tmp:rw,noexec,nosuid,size=64m",
+            "--memory",
+            lim.mem_limit,
+            "--cpu-quota",
+            str(lim.cpu_quota),
+            "-v",
+            f"{tmpdir}:/workspace:ro",
+            "-w",
+            "/workspace",
+            self.image,
+            *shlex.split(cmd),
+        ]
 
     async def run(
         self,
@@ -149,26 +197,7 @@ class DockerSandbox(Sandbox):
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 dest.write_text(f.content, encoding="utf-8")
 
-            docker_cmd = [
-                "docker",
-                "run",
-                "--rm",
-                "--network",
-                "none",
-                "--read-only",
-                "--tmpfs",
-                "/tmp:rw,noexec,nosuid,size=64m",
-                "--memory",
-                lim.mem_limit,
-                "--cpu-quota",
-                str(lim.cpu_quota),
-                "-v",
-                f"{tmpdir}:/workspace:ro",
-                "-w",
-                "/workspace",
-                self.image,
-                *shlex.split(cmd),
-            ]
+            docker_cmd = self._docker_args(tmpdir, lim, cmd)
 
             log.debug("DockerSandbox: %s", " ".join(docker_cmd))
             try:

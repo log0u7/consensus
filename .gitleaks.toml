@@ -1,0 +1,18 @@
+# Baseline for gitleaks (https://github.com/gitleaks/gitleaks).
+# Extends the built-in default rules; only local exceptions live here.
+[extend]
+# useDefault extends with gitleaks' bundled ruleset.
+useDefault = true
+
+[allowlist]
+description = "Test fixtures and documentation placeholders"
+paths = [
+  '''(^|/)\.env\.example$''',
+  '''(^|/)tests?/''',
+]
+regexes = [
+  '''REPLACE_WITH_YOUR_[A-Z_]+''',
+  '''change_me_[a-z_]+''',
+  '''(?i)dummy[_-]?api[_-]?key''',
+  '''ZEN_API_KEY=dummy''',
+]

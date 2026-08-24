@@ -1,0 +1,20 @@
+# Pre-commit hooks: secret scanning + lint/format parity with CI.
+# Install once per clone:  pip install pre-commit && pre-commit install
+#
+# gitleaks uses the `local` hook (system binary) instead of the upstream
+# pre-commit repo: that one builds gitleaks from Go source on first run,
+# which needs a Go toolchain. CI uses gitleaks/gitleaks-action instead.
+repos:
+  - repo: local
+    hooks:
+      - id: gitleaks
+        name: gitleaks (staged)
+        entry: gitleaks git --pre-commit --staged --redact
+        language: system
+        pass_filenames: false
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.20
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format

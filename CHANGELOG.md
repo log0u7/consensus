@@ -5,84 +5,21 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-08-24
+
+### Added
+
+- **Free default config**: `.env.example.free` with zero-key Ollama local (or remote qwen9b), OpenRouter `:free` and Groq fallbacks; `_parse_panel` fixed for Ollama model IDs with colons; `make dev` target for bare-metal uvicorn.
+- **Panel parser fix**: `_parse_panel` now robustly parses Ollama model IDs (`local/qwen:7b`) by treating trailing `:digits` as `max_tokens` only when >=256, otherwise as part of the model name.
+- **Makefile dev target**: `make dev` launches uvicorn bare-metal on port 8800 with hot-reload, `.env` loaded, no Docker required.
+
+---
+
 ## [Unreleased]
 
 ### Added
 
 - **Prompt-injection delimiting**: RAG chunks are wrapped in
-  `<untrusted source=rag>` markers and skill files in
-  `<untrusted source="skills">` inside prompts, so retrieved third-party
-  text is framed as data, not instructions.
-- **MCP hardening**: Streamable HTTP transports require `https` for remote
-  hosts (plain `http` restricted to loopback, misconfiguration fails loud);
-  every stdio server command is logged for auditability.
-- **Security documentation**: new `SECURITY.md` describing the loopback
-  no-auth posture, sandbox guarantees/limits, prompt-injection surface,
-  persistence locations and supply-chain controls.
-
-### Added
-
-- **Supply chain**: exact `==` pins for all runtime and dev dependencies
-  (versions taken from the tested venv); `pip-audit` added to dev deps and a
-  CI `security` job running `pip-audit --strict` plus `gitleaks` over the
-  full history; `.pre-commit-config.yaml` (gitleaks staged scan via system
-  binary + ruff check/format) with install instructions in CONTRIBUTING;
-  `.gitleaks.toml` baseline allowing test fixtures and doc placeholders.
-
-### Added
-
-- **Docker sandbox hardening**: `--cap-drop ALL`, `--security-opt
-  no-new-privileges`, `--pids-limit 128` and `--user <host-uid:gid>`
-  (unprivileged container user) added to `DockerSandbox`; the docstring's
-  invariants are now all enforced in the actual argv. Pure `_docker_args()`
-  builder is unit-tested.
-- **Sandbox skip visibility**: when a role requests `sandbox: true` but the
-  execution is skipped (e.g. docker missing), a warning is logged into the
-  run events ("generated code was NOT executed").
-
-### Fixed
-
-- **Header injection**: `/api/archive` `root` field is now constrained to
-  `[A-Za-z0-9._-]{1,64}` before landing in the `Content-Disposition`
-  filename.
-- **Client-facing error leakage**: SSE error events, chat failures and the
-  provider health probe now return only the exception type name; full
-  exception details (which can embed internal base URLs) go to server logs.
-
-### Changed
-
-- **Retry layering**: HTTP-status retries (429/503) are now owned solely by
-  the transport (`llm._post_with_retry`, the only layer that honours
-  `Retry-After`). The governor retries connection-level errors only and keeps
-  RPM limiting + fallback. Worst-case attempts per provider drop from
-  (N+1)^2 to N+1.
-
-### Fixed
-
-- **Governor invariant**: `run_pipeline` and `run_loop` role steps,
-  `lead_regen_artifacts`, `lead_chat` and `lead_chat_stream` now route every
-  LLM call through `governor.call()` (rate-limit + retry + fallback) via the
-  new `agents.governed_call()` helper; Anthropic SSE streaming acquires the
-  provider rate-limit slot through the new `governor.rpm()` context manager.
-- **Team manifest coder model ignored**: `run_consensus` parsed
-  `coder.model` but never used it. `write_code()` accepts a
-  `provider`/`model` override and the consensus topology passes the manifest
-  value through.
-- **Sandbox interpreter**: sandboxed code ran with the host's
-  `sys.executable`, which does not exist inside the container. New
-  `SANDBOX_PYTHON` env (default `python3`) names an interpreter present in
-  the sandbox environment.
-
-### Added
-
-- **SubprocessSandbox resource limits**: commands run under `/bin/sh -c`
-  with `ulimit -v` (address space, 2x docker-style limit), `ulimit -t`
-  (CPU seconds derived from timeout x cpu_quota) and `ulimit -f`
-  (`SANDBOX_FSIZE_MB`, default 64). Still NOT isolation: documented as such.
-
----
-
-## [0.2.0] - 2026-06-29
 
 ### Added
 

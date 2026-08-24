@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Supply chain**: exact `==` pins for all runtime and dev dependencies
+  (versions taken from the tested venv); `pip-audit` added to dev deps and a
+  CI `security` job running `pip-audit --strict` plus `gitleaks` over the
+  full history; `.pre-commit-config.yaml` (gitleaks staged scan via system
+  binary + ruff check/format) with install instructions in CONTRIBUTING;
+  `.gitleaks.toml` baseline allowing test fixtures and doc placeholders.
+
+### Added
+
 - **Docker sandbox hardening**: `--cap-drop ALL`, `--security-opt
   no-new-privileges`, `--pids-limit 128` and `--user <host-uid:gid>`
   (unprivileged container user) added to `DockerSandbox`; the docstring's

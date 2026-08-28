@@ -34,7 +34,7 @@ DC := docker compose $(COMPOSE_FILES) --env-file $(ENV_ACTIVE)
 # --- env merge -------------------------------------------------------------
 .PHONY: _env
 _env:
-	@test -f .env || { echo 'missing .env (copy from .env.example and fill ZEN_API_KEY)'; exit 1; }
+	@test -f .env || { echo 'missing .env (run `make setup` or `cp env.example .env` and fill a provider key)'; exit 1; }
 	@cat .env > $(ENV_ACTIVE)
 	@if [ -n "$(ENV)" ]; then \
 	  test -f .env.$(ENV) || { echo "missing .env.$(ENV)"; exit 1; }; \
@@ -110,6 +110,11 @@ index: _env ## Index docs-projet into the RAG store
 run: _env ## Run the pipeline on the CLI: make run SPEC="..."
 	$(DC) run --rm app python -m src.pipeline "$(SPEC)"
 
+# bare-metal uvicorn (no Docker), hot-reload, .env loaded
+.PHONY: dev
+dev: dev-setup ## Run uvicorn bare-metal on http://127.0.0.1:8800 with hot-reload
+	ZEN_API_KEY=dummy $(PY) -m uvicorn src.api:app --host 127.0.0.1 --port 8800 --reload
+
 .PHONY: config
 config: _env ## Show the merged compose configuration
 	$(DC) config
@@ -130,6 +135,22 @@ dev-setup: ## Create the dev venv and install dev/test tooling
 	@$(PY) -m pip install -q --upgrade pip
 	@$(PY) -m pip install -q -r requirements-dev.txt
 	@echo 'dev env ready: $(VENV)'
+
+.PHONY: setup
+setup: ## Interactive provider setup: imports keys, probes, writes .env
+	$(PY) -m src.setup
+
+.PHONY: setup-auto
+setup-auto: ## Write a tuned free-tier test .env from opencode keys (non-interactive)
+	$(PY) -m src.setup --auto
+
+.PHONY: setup-paid
+setup-paid: ## Paid OpenRouter routing for real testing (keeps keys, replaces routing)
+	$(PY) -m src.setup --auto --paid
+
+.PHONY: setup-check
+setup-check: ## Probe the currently configured providers (no changes)
+	$(PY) -m src.setup --check
 
 .PHONY: tui
 tui: _env ## Run the Textual TUI (stack must be up; interactive)
@@ -159,7 +180,7 @@ check: lint typecheck test ## Lint + typecheck + test (the CI entrypoint)
 clean: ## Remove local build/test artifacts (keeps .env; .env.active is regenerated)
 	rm -rf .coverage coverage.xml htmlcov .pytest_cache .mypy_cache .ruff_cache
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
-	rm -f rag.db cache.db .env.active
+	rm -f rag.db pricing.db cache.db .env.active
 
 .PHONY: test-docker
 test-docker: ## Run lint+typecheck+test inside a container (iso CI env)

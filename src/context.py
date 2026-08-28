@@ -41,7 +41,21 @@ class AgentContext:
     @property
     def tokens_estimate(self) -> int:
         """Rough token estimate: chars / 4 (conservative, model-agnostic)."""
-        return (len(self.system) + len(self.user)) // 4
+        return self.system_tokens + self.user_tokens
+
+    @property
+    def system_tokens(self) -> int:
+        """Rough token estimate of the stable (cacheable) prefix."""
+        return len(self.system) // 4
+
+    @property
+    def user_tokens(self) -> int:
+        """Rough token estimate of the volatile part (RAG + spec)."""
+        return len(self.user) // 4
+
+    @property
+    def total_tokens(self) -> int:
+        return self.system_tokens + self.user_tokens
 
 
 def _format_tools(tool_defs: list[dict]) -> str:

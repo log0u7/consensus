@@ -14,6 +14,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ ./src/
 COPY tui/ ./tui/
+# Team manifests and skill files are loaded at runtime from these paths.
+COPY teams/ ./teams/
+COPY skills/ ./skills/
 
 ENV PYTHONUNBUFFERED=1
 

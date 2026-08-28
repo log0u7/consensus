@@ -75,3 +75,31 @@ def test_dump_result_is_json_serializable():
     dumped = _dump(_sample_session())
     # Should not raise
     json.dumps(dumped)
+
+
+def test_members_roundtrip():
+    """Panel members are preserved through the dump/load cycle."""
+    from src.models import ConsensusReport, PipelineResult
+
+    session = {
+        "result": PipelineResult(spec="s", code="c", consensus=ConsensusReport()),
+        "system": "",
+        "history": [],
+        "members": [{"name": "r1", "provider": "zen", "model": "big-pickle", "max_tokens": 32000}],
+    }
+    loaded = _load(_dump(session))
+    assert loaded["members"][0]["name"] == "r1"
+    assert loaded["members"][0]["max_tokens"] == 32000
+
+
+def test_load_without_members_is_backward_compatible():
+    """Sessions persisted before the retry feature carry no members key."""
+    from src.models import ConsensusReport, PipelineResult
+
+    session = {
+        "result": PipelineResult(spec="s", code="c", consensus=ConsensusReport()),
+        "system": "",
+        "history": [],
+    }
+    loaded = _load(_dump(session))
+    assert loaded["members"] == []

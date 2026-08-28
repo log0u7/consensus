@@ -22,6 +22,22 @@ from .models import (
 log = logging.getLogger(__name__)
 
 
+def context_stats(system: str, user: str, provider: str, model: str) -> dict:
+    """Describe prompt size for an event's `context` field.
+
+    Token counts are rough (chars / 4); the topology enriches them with
+    pricing-derived context_window / est_input_cost.
+    """
+    st = len(system) // 4
+    ut = len(user) // 4
+    return {
+        "system_tokens": st,
+        "user_tokens": ut,
+        "total_tokens": st + ut,
+        "model": f"{provider}/{model}",
+    }
+
+
 def _parse_files(raw: object) -> list[Artifact]:
     """Validate a model-provided files list into Artifacts, skipping invalid entries."""
     out: list[Artifact] = []
@@ -124,6 +140,12 @@ async def write_code(
         "code": code,
         "notes": data.get("notes", ""),
         "files": files,
+        "context_stats": context_stats(
+            _CODER_SYS,
+            user,
+            provider,
+            model,
+        ),
     }
 
 
@@ -143,6 +165,20 @@ _REVIEW_SYS = (
 )
 
 
+def _review_user(code: str) -> str:
+    return f"Code to review:\n\n{code}"
+
+
+def review_context_stats(panel_member: dict, code: str) -> dict:
+    """Context stats for one reviewer call (same prompt as review_code)."""
+    return context_stats(
+        _REVIEW_SYS,
+        _review_user(code),
+        panel_member["provider"],
+        panel_member["model"],
+    )
+
+
 async def review_code(panel_member: dict, code: str) -> Review:
     """Run one reviewer. On failure, return Review(ok=False) so the panel
     stays resilient (consensus uses whoever answered)."""
@@ -150,7 +186,7 @@ async def review_code(panel_member: dict, code: str) -> Review:
     provider = panel_member["provider"]
     model = panel_member["model"]
     max_tokens = panel_member.get("max_tokens") or config.REVIEW_MAX_TOKENS
-    user = f"Code to review:\n\n{code}"
+    user = _review_user(code)
     tok = llm.set_step(f"reviewer:{name}")
     try:
 
@@ -202,6 +238,23 @@ _CONSENSUS_SYS = (
 )
 
 
+def _reviews_blob(reviews: list[Review]) -> str:
+    participating = [r for r in reviews if r.ok]
+    blob_parts = []
+    for r in participating:
+        lines = [f"### Reviewer: {r.reviewer}", f"overall: {r.overall}"]
+        for i in r.issues:
+            lines.append(f"- [{i.severity}/{i.category}] {i.title} @ {i.location}: {i.description}")
+        blob_parts.append("\n".join(lines))
+    return "\n\n".join(blob_parts)
+
+
+def consensus_context_stats(reviews: list[Review]) -> dict:
+    """Context stats for the consensus aggregation call."""
+    provider, model = quota.consensus_model()
+    return context_stats(_CONSENSUS_SYS, f"Reviews:\n\n{_reviews_blob(reviews)}", provider, model)
+
+
 async def build_consensus(reviews: list[Review]) -> ConsensusReport:
     participating = [r for r in reviews if r.ok]
     panel_names = [r.reviewer for r in participating]
@@ -210,13 +263,7 @@ async def build_consensus(reviews: list[Review]) -> ConsensusReport:
     if not participating:
         return ConsensusReport(panel=[], issues=[], summary="No reviewer answered.")
 
-    blob_parts = []
-    for r in participating:
-        lines = [f"### Reviewer: {r.reviewer}", f"overall: {r.overall}"]
-        for i in r.issues:
-            lines.append(f"- [{i.severity}/{i.category}] {i.title} @ {i.location}: {i.description}")
-        blob_parts.append("\n".join(lines))
-    blob = "\n\n".join(blob_parts)
+    blob = _reviews_blob(reviews)
 
     provider, model = quota.consensus_model()
     tok = llm.set_step("consensus")
@@ -238,6 +285,19 @@ async def build_consensus(reviews: list[Review]) -> ConsensusReport:
                 fallback=config.CONSENSUS_FALLBACK,
                 fallback_factory=lambda p: lambda: _make(p, attempt),
             )
+        )
+    except Exception as exc:
+        # Provider failure (429 bursts exhausted, network, ...): the run must
+        # always complete, so degrade the consensus and let the Lead arbitrate
+        # on the raw reviews alone.
+        log.warning("consensus unavailable (%s: %s), degrading report", type(exc).__name__, exc)
+        return ConsensusReport(
+            panel=panel_names,
+            issues=[],
+            summary=(
+                f"Consensus aggregation failed ({type(exc).__name__}); "
+                "the Lead arbitrates on the raw panel reviews below."
+            ),
         )
     finally:
         llm.reset_step(tok)
@@ -320,6 +380,21 @@ _LEAD_REGEN_INSTR = (
 )
 
 
+def _degraded_verdict(code: str, reason: str) -> dict:
+    """Verdict used when the Lead itself could not answer. Never empty:
+    final_code carries the coder's code so the UI/report always show code."""
+    return {
+        "verdict": "APPROVE_WITH_CHANGES",
+        "degraded": True,
+        "rationale": (
+            f"{reason} Review the panel and consensus, then ask the Lead in "
+            "the chat to restate its verdict or regenerate the files."
+        ),
+        "final_code": code,
+        "files": [],
+    }
+
+
 async def lead_verdict(spec: str, code: str, consensus_json: str) -> dict:
     system = LEAD_SYSTEM_TEMPLATE.format(spec=spec, code=code, consensus=consensus_json)
     provider, model = quota.lead_model()
@@ -349,24 +424,26 @@ async def lead_verdict(spec: str, code: str, consensus_json: str) -> dict:
         )
     except ValueError as exc:
         log.warning("lead verdict unparseable, returning degraded verdict: %s", exc)
-        return {
-            "verdict": "APPROVE_WITH_CHANGES",
-            "rationale": (
-                "The Lead's structured answer could not be parsed (likely truncated). "
-                "Review the panel and consensus, then ask the Lead in the chat to "
-                "restate its verdict or regenerate the files."
-            ),
-            "final_code": "",
-            "files": [],
-        }
+        return _degraded_verdict(
+            code, "The Lead's structured answer could not be parsed (likely truncated)."
+        )
+    except Exception as exc:
+        # Provider failure (429 bursts exhausted, network, ...): degrade
+        # instead of killing the run - the panel output stays reviewable.
+        log.warning(
+            "lead call failed (%s: %s), returning degraded verdict", type(exc).__name__, exc
+        )
+        return _degraded_verdict(code, f"The Lead is unreachable ({type(exc).__name__}).")
     finally:
         llm.reset_step(tok)
 
     return {
         "verdict": data.get("verdict", ""),
+        "degraded": False,
         "rationale": data.get("rationale", ""),
         "final_code": data.get("final_code", ""),
         "files": _parse_files(data.get("files")),
+        "context_stats": context_stats(system, _LEAD_VERDICT_INSTR, provider, model),
     }
 
 
@@ -399,8 +476,11 @@ async def lead_regen_artifacts(system: str, history: list[dict[str, str]]) -> li
 
 
 async def lead_chat(system: str, history: list[dict[str, str]]) -> str:
-    """Free-form conversation with the Lead (full history, all transports)."""
-    provider, model = quota.lead_model()
+    """Free-form conversation with the Lead (full history, all transports).
+
+    Uses the chat profile (CHAT_MODEL, e.g. a local model for exploration);
+    falls back to the Lead model when CHAT_MODEL is unset."""
+    provider, model = quota.chat_model()
 
     def _make(prov: str) -> Awaitable[str]:
         # Anthropic transport takes system as a top-level parameter;
@@ -425,8 +505,9 @@ def lead_chat_stream(system: str, history: list[dict[str, str]]):
     """Streaming variant of lead_chat: async iterator of text deltas.
     Anthropic uses native SSE streaming; other providers emit one chunk.
     Streaming cannot retry mid-stream, so the Anthropic path only acquires
-    the provider's rate-limit slot (governor.rpm)."""
-    provider, model = quota.lead_model()
+    the provider's rate-limit slot (governor.rpm).
+    Uses the chat profile (CHAT_MODEL) like lead_chat."""
+    provider, model = quota.chat_model()
     if provider == "anthropic":
 
         async def _anthropic_stream():

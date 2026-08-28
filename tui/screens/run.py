@@ -144,6 +144,7 @@ class RunScreen(Screen):
         self._running = True
         self._session_id = None
         self._result = None
+        self.query_one(StatusBar).reset_session()
 
         btn = self.query_one("#run-button", Button)
         btn.label = "Running..."
@@ -189,9 +190,10 @@ class RunScreen(Screen):
             output.write(f"\n[bold]Code generated[/] ({esc(lang)}, {len(lines)} lines)")
             usage = event.get("usage", {})
             if usage:
-                output.write(
-                    f"  usage: {usage.get('input_tokens', 0)} in / {usage.get('output_tokens', 0)} out"
-                )
+                output.write(_usage_line(usage))
+            ctx = event.get("context")
+            if ctx:
+                output.write(_ctx_line(ctx))
 
         elif etype == "review":
             review = event.get("review", {})
@@ -212,6 +214,9 @@ class RunScreen(Screen):
                 )
             if review.get("overall"):
                 output.write(f"  overall: {esc(review['overall'])}")
+            ctx = event.get("context")
+            if ctx:
+                output.write(_ctx_line(ctx))
 
         elif etype == "consensus":
             consensus = event.get("consensus", {})
@@ -261,17 +266,32 @@ class RunScreen(Screen):
                 output.write(f"\nRAG sources: {len(rag)} chunks")
             usages = result.get("usages", [])
             for u in usages:
+                cached = u.get("cached_tokens", 0)
+                cached_txt = f", {cached} cached" if cached else ""
                 output.write(
                     f"  [{u.get('step', '?')}] {u.get('model', '?')}: "
                     f"{u.get('input_tokens', 0)} in / {u.get('output_tokens', 0)} out"
-                    f" ({u.get('latency_ms', 0)}ms)"
+                    f"{cached_txt} ({u.get('latency_ms', 0)}ms)"
                 )
             cost = result.get("cost_summary", {})
+            cost_known = cost.get("cost_known")
+            cost_txt = f"${cost.get('cost', 0):.4f}" if cost_known else "n/a"
             output.write(
-                f"\n[bold]Cost: ${cost.get('cost', 0):.4f} "
+                f"\n[bold]Cost: {cost_txt} "
                 f"({cost.get('calls', 0)} calls, "
                 f"{cost.get('input_tokens', 0)} in / {cost.get('output_tokens', 0)} out)[/]"
             )
+            for p in cost.get("by_provider", []) or []:
+                pc = f"${p.get('cost', 0):.4f}" if p.get("cost_known") else "n/a"
+                cached_txt = (
+                    f", {p.get('cached_tokens', 0)} cached" if p.get("cached_tokens") else ""
+                )
+                output.write(
+                    f"  {esc(p.get('provider', '?'))}: {p.get('calls', 0)} calls, "
+                    f"{p.get('input_tokens', 0)} in / {p.get('output_tokens', 0)} out"
+                    f"{cached_txt} - {pc}"
+                )
+            self.query_one(StatusBar).add_usage(cost)
 
         elif etype == "error":
             output.write(f"\n[bold red]Pipeline error: {esc(event.get('error', 'Unknown'))}[/]")
@@ -289,6 +309,24 @@ def _sev_color(sev: str) -> str:
     return {"critical": "red", "high": "orange", "medium": "yellow", "low": "green"}.get(
         sev.lower(), "white"
     )
+
+
+def _usage_line(usage: dict[str, Any]) -> str:
+    cached = usage.get("cached_tokens", 0)
+    cached_txt = f", {cached} cached" if cached else ""
+    return f"  usage: {usage.get('input_tokens', 0)} in / {usage.get('output_tokens', 0)} out{cached_txt}"
+
+
+def _ctx_line(ctx: dict[str, Any]) -> str:
+    total = ctx.get("total_tokens", 0)
+    window = ctx.get("context_window")
+    est = ctx.get("est_input_cost")
+    parts = [f"ctx: {total}"]
+    if window:
+        parts.append(f"window {window}")
+    if est is not None:
+        parts.append(f"~${est:.5f} in")
+    return "  " + " / ".join(parts)
 
 
 def _score_bar(score: float) -> str:

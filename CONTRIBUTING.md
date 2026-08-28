@@ -51,9 +51,9 @@ ci(github): add Python 3.13 to test matrix
 
 ## Secrets
 
-- Never commit secrets. `.gitignore` excludes all `.env*` files except
-  `.env.example`.
-- `.env.example` contains only placeholders.
+- Never commit secrets. `.gitignore` excludes all `.env*` files. The tracked
+  template is `env.example` (no leading dot, placeholder values only).
+- `env.example` contains only placeholders.
 - Secret scanning runs in two places: a `gitleaks` pre-commit hook and a CI
   job. Enable the local hook once per clone:
 

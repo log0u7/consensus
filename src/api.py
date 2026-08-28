@@ -115,6 +115,15 @@ class RegenResponse(BaseModel):
     usage: CostSummary = CostSummary()
 
 
+class RetryReviewerRequest(BaseModel):
+    session_id: str
+    reviewer: str = Field(min_length=1, max_length=64)
+
+
+class RetryLeadRequest(BaseModel):
+    session_id: str
+
+
 class ArchiveRequest(BaseModel):
     files: list[Artifact] = Field(min_length=1)
     format: str = "zip"
@@ -135,9 +144,10 @@ def _run_slot() -> asyncio.Semaphore:
     return _run_semaphore
 
 
-def _seed_session(result: PipelineResult) -> str:
+def _seed_session(result: PipelineResult, members: list[dict] | None = None) -> str:
     """Create a session holding the result and a Lead history seeded with its
-    own verdict, so the follow-up chat continues coherently."""
+    own verdict, so the follow-up chat continues coherently. Members (the
+    panel configs actually used) are kept for the retry endpoints."""
     system = pipeline.lead_system_for(result)
     history = [
         {"role": "user", "content": "Give your verdict on this code."},
@@ -146,7 +156,13 @@ def _seed_session(result: PipelineResult) -> str:
             "content": f"Verdict: {result.verdict}\n\n{result.rationale}",
         },
     ]
-    return store.create({"result": result, "system": system, "history": history})
+    return store.create(
+        {"result": result, "system": system, "history": history, "members": members or []}
+    )
+
+
+def _sse(payload: dict) -> str:
+    return f"data: {json.dumps(payload)}\n\n"
 
 
 @app.post("/api/run", response_model=RunResponse)
@@ -155,7 +171,7 @@ async def api_run(req: RunRequest):
         raise HTTPException(status_code=400, detail="empty spec")
     async with _run_slot():
         result: PipelineResult = await pipeline.run(req.spec, use_rag=req.use_rag)
-    sid = _seed_session(result)
+    sid = _seed_session(result, quota.panel())
     return RunResponse(session_id=sid, result=result)
 
 
@@ -177,11 +193,109 @@ async def api_run_stream(req: RunRequest):
                 async for event in pipeline.run_streaming(req.spec, use_rag=req.use_rag):
                     if event["type"] == "result":
                         result = PipelineResult.model_validate(event["result"])
-                        event["session_id"] = _seed_session(result)
-                    yield f"data: {json.dumps(event)}\n\n"
+                        event["session_id"] = _seed_session(result, event.get("members"))
+                    yield _sse(event)
         except Exception as exc:  # noqa: BLE001
             log.warning("run stream failed: %s: %s", type(exc).__name__, exc)
-            yield f"data: {json.dumps({'type': 'error', 'error': type(exc).__name__})}\n\n"
+            yield _sse({"type": "error", "error": type(exc).__name__})
+
+    return StreamingResponse(
+        with_heartbeat(gen()), media_type="text/event-stream", headers=SSE_HEADERS
+    )
+
+
+@app.post("/api/run/retry/reviewer")
+async def api_retry_reviewer(req: RetryReviewerRequest):
+    """Re-run ONE panel reviewer against the same code and model. On success,
+    the consensus AND the Lead verdict are replayed with the updated panel and
+    the session is updated in place. On failure, the session state is kept.
+
+    SSE events: {"type":"review"}, {"type":"consensus"}, {"type":"result"}.
+    """
+    sess = store.get(req.session_id)
+    if sess is None:
+        raise HTTPException(status_code=404, detail="session expired or unknown")
+    result: PipelineResult = sess["result"]
+    member = next((m for m in sess.get("members", []) if m.get("name") == req.reviewer), None)
+    if member is None:
+        raise HTTPException(status_code=404, detail="reviewer not found in this session")
+
+    from . import agents
+    from .models import summarize_usage
+
+    async def gen():
+        try:
+            async with _run_slot():
+                with llm.usage_scope() as reviewer_usages:
+                    review = await agents.review_code(member, result.code)
+                if not review.ok:
+                    yield _sse({"type": "error", "error": f"reviewer {req.reviewer} failed again"})
+                    return
+                result.reviews = [
+                    review if r.reviewer == review.reviewer else r for r in result.reviews
+                ]
+                consensus = await agents.build_consensus(result.reviews)
+                with llm.usage_scope() as lead_usages:
+                    verdict = await agents.lead_verdict(
+                        result.spec, result.code, consensus.model_dump_json()
+                    )
+            result.consensus = consensus
+            result.verdict = verdict["verdict"]
+            result.verdict_degraded = bool(verdict.get("degraded", False))
+            result.rationale = verdict["rationale"]
+            result.final_code = verdict["final_code"]
+            result.files = verdict["files"] or result.files
+            result.usages = list(result.usages) + list(reviewer_usages) + list(lead_usages)
+            result.cost_summary = summarize_usage(result.usages)
+            store.save(req.session_id, sess)
+            yield _sse({"type": "review", "review": review.model_dump()})
+            yield _sse({"type": "consensus", "consensus": consensus.model_dump()})
+            yield _sse(
+                {"type": "result", "session_id": req.session_id, "result": result.model_dump()}
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("reviewer retry failed: %s: %s", type(exc).__name__, exc)
+            yield _sse({"type": "error", "error": f"{type(exc).__name__}: {exc}"})
+
+    return StreamingResponse(
+        with_heartbeat(gen()), media_type="text/event-stream", headers=SSE_HEADERS
+    )
+
+
+@app.post("/api/run/retry/lead")
+async def api_retry_lead(req: RetryLeadRequest):
+    """Re-run the Lead verdict against the stored spec/code/consensus
+    (refresh a result you do not like, or recover a degraded verdict).
+    SSE events: {"type":"result"}."""
+    sess = store.get(req.session_id)
+    if sess is None:
+        raise HTTPException(status_code=404, detail="session expired or unknown")
+    result: PipelineResult = sess["result"]
+
+    from . import agents
+    from .models import summarize_usage
+
+    async def gen():
+        try:
+            async with _run_slot():
+                with llm.usage_scope() as usages:
+                    verdict = await agents.lead_verdict(
+                        result.spec, result.code, result.consensus.model_dump_json()
+                    )
+                result.verdict = verdict["verdict"]
+                result.verdict_degraded = bool(verdict.get("degraded", False))
+                result.rationale = verdict["rationale"]
+                result.final_code = verdict["final_code"]
+                result.files = verdict["files"] or result.files
+                result.usages = list(result.usages) + list(usages)
+                result.cost_summary = summarize_usage(result.usages)
+            store.save(req.session_id, sess)
+            yield _sse(
+                {"type": "result", "session_id": req.session_id, "result": result.model_dump()}
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("lead retry failed: %s: %s", type(exc).__name__, exc)
+            yield _sse({"type": "error", "error": f"{type(exc).__name__}: {exc}"})
 
     return StreamingResponse(
         with_heartbeat(gen()), media_type="text/event-stream", headers=SSE_HEADERS
@@ -321,7 +435,19 @@ async def api_quota_set(req: QuotaRequest):
 @app.get("/api/health")
 async def health(check_provider: str | None = None):
     out = {"status": "ok", "sessions": len(store), "panel_size": len(quota.panel())}
-    if check_provider:
+    if check_provider == "all":
+        import asyncio as _asyncio
+
+        names = list(config.PROVIDERS)
+        probes = await _asyncio.gather(
+            *(llm.provider_reachable(name) for name in names),
+            return_exceptions=True,
+        )
+        out["providers"] = {
+            name: p if isinstance(p, dict) else {"reachable": False, "error": type(p).__name__}
+            for name, p in zip(names, probes, strict=True)
+        }
+    elif check_provider:
         out["provider"] = await llm.provider_reachable(check_provider)
     return out
 

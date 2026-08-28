@@ -44,23 +44,67 @@ def sanitize_path(raw: str) -> str:
 
 class Usage(BaseModel):
     """One LLM call's accounting. cost is None when the transport does not
-    report one (Anthropic bills tokens, no per-call cost on this gateway)."""
+    report one and pricing lookup could not price the model; cached_tokens is
+    the provider-side prefix-cache hit count (0 when the provider does not
+    report one)."""
 
     step: str = ""  # coder | reviewer:<name> | consensus | lead | chat
     transport: str = ""
     model: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
+    cached_tokens: int = 0
     cost: float | None = None
     latency_ms: int = 0
+
+
+class ProviderUsage(BaseModel):
+    """Per-provider rollup of a run's Usage records."""
+
+    provider: str
+    calls: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cached_tokens: int = 0
+    cost: float = 0.0
+    cost_known: bool = False
 
 
 class CostSummary(BaseModel):
     calls: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
+    cached_tokens: int = 0
     cost: float = 0.0  # sum of known per-call costs
     cost_known: bool = False  # False when no call reported a cost
+    by_provider: list[ProviderUsage] = []
+
+
+def summarize_usage(usages: list[Usage]) -> CostSummary:
+    """Single aggregator for Usage records (pipeline, topologies, chat).
+
+    Sums tokens/costs and rolls up per-provider totals by `transport`.
+    """
+    cost = sum(u.cost for u in usages if u.cost is not None)
+    by: dict[str, ProviderUsage] = {}
+    for u in usages:
+        p = by.setdefault(u.transport, ProviderUsage(provider=u.transport))
+        p.calls += 1
+        p.input_tokens += u.input_tokens
+        p.output_tokens += u.output_tokens
+        p.cached_tokens += u.cached_tokens
+        if u.cost is not None:
+            p.cost += u.cost
+            p.cost_known = True
+    return CostSummary(
+        calls=len(usages),
+        input_tokens=sum(u.input_tokens for u in usages),
+        output_tokens=sum(u.output_tokens for u in usages),
+        cached_tokens=sum(u.cached_tokens for u in usages),
+        cost=round(cost, 6),
+        cost_known=any(u.cost is not None for u in usages),
+        by_provider=[by[k] for k in sorted(by)],
+    )
 
 
 class Issue(BaseModel):
@@ -151,6 +195,7 @@ class PipelineResult(BaseModel):
     reviews: list[Review] = []
     consensus: ConsensusReport
     verdict: str = ""  # APPROVE | APPROVE_WITH_CHANGES | REJECT
+    verdict_degraded: bool = False  # True when the Lead itself could not answer
     final_code: str = ""
     rationale: str = ""
     files: list[Artifact] = []  # multi-file solution; empty for single-file

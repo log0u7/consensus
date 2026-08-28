@@ -1,38 +1,34 @@
 # Standard code review team.
 # Topology: coder -> parallel panel -> consensus aggregator -> lead.
-# This manifest reproduces the original hardcoded pipeline exactly.
+#
+# Env-driven by design: no models are pinned here, so CODER_MODEL,
+# CONSENSUS_MODEL, LEAD_MODEL, REVIEW_PANEL and CHAT_MODEL (see env.example)
+# decide what runs. Pin models in this file only to lock a domain to specific
+# models; the coder/consensus/lead role blocks below show the override points.
 topology: consensus
 sandbox: false
 
 roles:
   coder:
-    model: zen/deepseek-v3-0324
+    # model: zen/big-pickle     # uncomment to pin (else CODER_MODEL wins)
     fallback: []
-    max_tokens: 8000
     skills: []
     tools: []
     rag_ns: ""
     sandbox: false
 
   reviewer:
-    # Explicit panel members. Remove 'members' to fall back to config.PANEL.
-    members:
-      - name: deepseek-coder
-        model: zen/deepseek-v3-0324
-      - name: qwen3-coder
-        model: zen/qwen3-coder
-      - name: mimo-vl
-        model: zen/mimo-vl-7b-rl
+    # Without 'members' the panel comes from REVIEW_PANEL / config default.
+    # members:
+    #   - name: reviewer-1
+    #     model: zen/big-pickle
     fallback: []
-    max_tokens: 8000
     sandbox: false
 
   consensus:
-    model: zen/deepseek-r1-0528
+    # model: zen/glm-4.5-flash   # else CONSENSUS_MODEL wins
     fallback: []
-    max_tokens: 8000
 
   lead:
-    model: zen/deepseek-r1-0528
+    # model: zen/glm-4.5-flash   # else LEAD_MODEL wins
     fallback: []
-    max_tokens: 16000

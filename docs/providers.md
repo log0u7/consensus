@@ -8,10 +8,11 @@ registered in `src/config.py` and resolved by name at runtime.
 Models are referenced everywhere as `provider/model-id`:
 
 ```
-zen/deepseek-r1-0528
+zen/big-pickle
 anthropic/claude-opus-latest
 openai/gpt-4o
-local/qwen2.5-coder
+openrouter/deepseek/deepseek-r1
+local/qwen3-8b
 ```
 
 This format is used in team YAMLs, environment variables (`CODER_MODEL`,
@@ -19,31 +20,69 @@ This format is used in team YAMLs, environment variables (`CODER_MODEL`,
 
 ## Built-in providers
 
-| Name        | Transport          | Endpoint env var        | Default base URL                    |
-|-------------|--------------------|-------------------------|-------------------------------------|
-| `zen`       | OpenAI-compatible  | `ZEN_BASE_URL`          | `https://opencode.ai/zen/v1`        |
-| `openai`    | OpenAI-compatible  | `OPENAI_BASE_URL`       | `https://api.openai.com/v1`         |
-| `anthropic` | Anthropic Messages | `ANTHROPIC_BASE_URL`    | `https://api.anthropic.com/v1`      |
-| `local`     | OpenAI-compatible  | `LOCAL_BASE_URL`        | `http://localhost:11434/v1` (Ollama) |
+| Name         | Transport          | Endpoint env var       | Default base URL                          |
+|--------------|--------------------|------------------------|-------------------------------------------|
+| `zen`        | OpenAI-compatible  | `ZEN_BASE_URL`         | `https://opencode.ai/zen/v1`              |
+| `openrouter` | OpenAI-compatible  | `OPENROUTER_BASE_URL`  | `https://openrouter.ai/api/v1`            |
+| `openai`     | OpenAI-compatible  | `OPENAI_BASE_URL`      | `https://api.openai.com/v1`               |
+| `anthropic`  | Anthropic Messages | `ANTHROPIC_BASE_URL`   | `https://api.anthropic.com/v1`            |
+| `local`      | OpenAI-compatible  | `LOCAL_BASE_URL`       | `http://127.0.0.1:8080` (llama.cpp server) |
 
 The `zen` provider is free (no credit card required) at opencode.ai. It proxies
 a wide range of open-weight and frontier models.
 
 ### OpenRouter
 
-OpenRouter is reachable via the `zen` provider or by configuring a custom
-`openai`-compatible provider pointing at `https://openrouter.ai/api/v1`. It uses
-the OpenAI-compatible `POST /chat/completions` transport (not `/messages`).
+Configure `OPENROUTER_API_KEY` and the app registers the `openrouter` provider
+(OpenAI-compatible transport). The app sends `"usage": {"include": true}` on
+every call so OpenRouter reports the real cost, which is shown in the UI and
+stored in `Usage.cost`.
+
+### Local (llama.cpp / Ollama / vLLM)
+
+Set `LOCAL_BASE_URL` (OpenAI-compatible endpoint) and optionally
+`LOCAL_API_KEY`. The default request payload includes
+`PROVIDER_EXTRA_PAYLOAD_LOCAL={"cache_prompt":true}` so llama.cpp keeps the KV
+prefix warm between calls; override that variable with `{}` for servers that
+reject the field. Local models are treated as free (cost 0.0); set
+`CONTEXT_WINDOW_LOCAL` so the UI can show the context fill level.
+
+## Cost and context metering
+
+`src/pricing.py` fetches OpenRouter's public model catalog (no key required)
+and caches it in `pricing.db` (`PRICING_TTL_HOURS`, default 24). It provides:
+
+- per-call cost fallback when a provider does not report one,
+- context windows for the UI's context meter,
+- free-model detection used by the `make setup` routing suggestions.
+
+Lookups never block on the network: the cached catalog is served immediately
+and a stale catalog is refreshed in the background. When nothing is known,
+costs show as `n/a` and the run is unaffected.
+
+## Prompt caching
+
+The context builder keeps the stable prefix (system + skills + tools) first,
+so providers can serve it from their prefix cache:
+
+- **Anthropic**: the system prompt is sent as a `cache_control: ephemeral`
+  block; `cache_read_input_tokens` from the response (and from the streaming
+  `message_start` event) is recorded as `Usage.cached_tokens`.
+- **OpenAI-compatible**: `prompt_tokens_details.cached_tokens` (or
+  `cache_read_input_tokens`) is recorded when the provider reports it.
+- **llama.cpp**: `cache_prompt` avoids re-evaluating the prefix server-side.
+
+Cached tokens are displayed in the web UI (usage popover, chat cost lines) and
+the TUI.
 
 ## Transport details
 
 Two transports are implemented in `src/llm.py`:
 
 - **OpenAI-compatible** (`complete`): `POST /chat/completions` with a
-  `messages` array. Used by `zen`, `openai`, `local`.
+  `messages` array. Used by `zen`, `openrouter`, `openai`, `local`.
 - **Anthropic Messages** (`call_anthropic_history` / streaming variant): native
-  `POST /messages` with `system` as a top-level parameter. Used only when
-  `provider == "anthropic"`.
+  `POST /messages`. Used only when `provider == "anthropic"`.
 
 The Anthropic streaming transport uses native SSE (`"stream": true`).
 

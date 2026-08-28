@@ -30,8 +30,8 @@ log = logging.getLogger(__name__)
 
 
 # --- serialization helpers -------------------------------------------------
-# A session value is {"result": PipelineResult, "system": str, "history": list}.
-# For storage we serialize result to its JSON dump.
+# A session value is {"result": PipelineResult, "system": str, "history": list,
+# "members": list}. For storage we serialize result to its JSON dump.
 
 
 def _dump(value: dict) -> dict:
@@ -40,6 +40,9 @@ def _dump(value: dict) -> dict:
         "result": result.model_dump() if isinstance(result, PipelineResult) else result,
         "system": value.get("system", ""),
         "history": value.get("history", []),
+        # Panel member configs used by the run (retry endpoints replay a
+        # reviewer against the same model).
+        "members": value.get("members", []),
     }
 
 
@@ -49,6 +52,7 @@ def _load(row: dict) -> dict:
         "result": PipelineResult.model_validate(result) if isinstance(result, dict) else result,
         "system": row.get("system", ""),
         "history": row.get("history", []),
+        "members": row.get("members", []),  # absent in pre-retry sessions
     }
 
 

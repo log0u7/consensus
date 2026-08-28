@@ -15,23 +15,12 @@ import uuid
 from collections.abc import AsyncIterator
 
 from . import agents, config
-from .models import CostSummary, PipelineResult, Usage
+from .models import CostSummary, PipelineResult
+from .models import summarize_usage as summarize_usage  # re-exported (api.py)
 
 log = logging.getLogger(__name__)
 
 _DEFAULT_TEAM = "consensus"
-
-
-def summarize_usage(usages: list[Usage]) -> CostSummary:
-    cost = sum(u.cost for u in usages if u.cost is not None)
-    cost_known = any(u.cost is not None for u in usages)
-    return CostSummary(
-        calls=len(usages),
-        input_tokens=sum(u.input_tokens for u in usages),
-        output_tokens=sum(u.output_tokens for u in usages),
-        cost=round(cost, 6),
-        cost_known=cost_known,
-    )
 
 
 async def run_streaming(
@@ -43,10 +32,14 @@ async def run_streaming(
     """Stream pipeline events for the given team.
 
     Default team "consensus" emits:
-      {"type": "code",      "code", "language", "usage"}
-      {"type": "review",    "review": ..., "usage"}
-      {"type": "consensus", "consensus": ..., "usage"}
+      {"type": "code",      "code", "language", "usage", "context"}
+      {"type": "review",    "review": ..., "usage", "context"}
+      {"type": "consensus", "consensus": ..., "usage", "context"}
       {"type": "result",    "result": <PipelineResult dict>}
+
+    `context` describes the prompt size of the step that produced the event:
+    {system_tokens, user_tokens, total_tokens, model, context_window,
+    est_input_cost}.
 
     Other topologies emit topology-specific events plus a final "result".
     """
@@ -136,9 +129,10 @@ if __name__ == "__main__":
     print(res.rationale)
     cs = res.cost_summary
     cost = f"{cs.cost}" if cs.cost_known else "unknown"
+    cached = f", {cs.cached_tokens} cached" if cs.cached_tokens else ""
     print(
         f"\n===== USAGE: {cs.calls} calls, {cs.input_tokens} in / "
-        f"{cs.output_tokens} out tokens, cost={cost} ====="
+        f"{cs.output_tokens} out tokens{cached}, cost={cost} ====="
     )
     print("\n===== FINAL CODE =====")
     print(res.final_code)

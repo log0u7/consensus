@@ -20,24 +20,23 @@ import logging
 import time
 from collections.abc import AsyncIterator, Callable
 
-from . import agents, config, llm, quota
+from . import agents, config, llm, pricing, quota
 from . import sandbox as sandbox_mod
-from .models import ConsensusReport, CostSummary, PipelineResult, SandboxResult, Usage
+from .models import ConsensusReport, PipelineResult, SandboxResult, summarize_usage
 from .roles import Role, Team
 
 log = logging.getLogger(__name__)
 
 
-def _summarize(usages: list[Usage]) -> CostSummary:
-    cost = sum(u.cost for u in usages if u.cost is not None)
-    cost_known = any(u.cost is not None for u in usages)
-    return CostSummary(
-        calls=len(usages),
-        input_tokens=sum(u.input_tokens for u in usages),
-        output_tokens=sum(u.output_tokens for u in usages),
-        cost=round(cost, 6),
-        cost_known=cost_known,
-    )
+def _context_event(stats: dict) -> dict:
+    """Enrich agent-reported context stats with pricing-derived metadata:
+    the model's context window and the estimated input cost of one prompt."""
+    out = dict(stats)
+    ref = stats.get("model", "")
+    prov, _, mod = ref.partition("/")
+    out["context_window"] = pricing.context_window_for(ref) if ref else None
+    out["est_input_cost"] = pricing.cost_for(prov, mod, stats.get("total_tokens", 0), 0)
+    return out
 
 
 def _panel_members(reviewer_role: Role) -> list[dict]:
@@ -93,12 +92,20 @@ async def run_consensus(
             coded = await agents.write_code(spec, context)
         code = coded["code"]
         rlog("info", "coder done (%.1fs)", time.perf_counter() - t0)
-        yield {
+        # Panel members resolved BEFORE the code event so the UI knows the
+        # exact reviewer count (the reactive low-quota panel can differ from
+        # the one a cached /api/health snapshot reported).
+        members = _panel_members(reviewer_role) if reviewer_role else quota.panel()
+        code_event: dict = {
             "type": "code",
             "code": code,
             "language": coded["language"],
-            "usage": _summarize(usages).model_dump(),
+            "panel_size": len(members),
+            "usage": summarize_usage(usages).model_dump(),
         }
+        if coded.get("context_stats"):
+            code_event["context"] = _context_event(coded["context_stats"])
+        yield code_event
 
         # 1b. Optional sandbox execution (opt-in via coder_role.sandbox)
         exec_result: sandbox_mod.SandboxResult | None = None
@@ -131,24 +138,25 @@ async def run_consensus(
                     "timed_out": exec_result.timed_out,
                     "engine": exec_result.engine,
                 },
-                "usage": _summarize(usages).model_dump(),
+                "usage": summarize_usage(usages).model_dump(),
             }
 
         # Inject execution output into code context for panel.
         panel_code = code if not sandbox_context else f"{code}\n\n{sandbox_context}"
 
         # 2. Panel (parallel, resilient)
-        members = _panel_members(reviewer_role) if reviewer_role else quota.panel()
         t_panel = time.perf_counter()
         reviews: list = []
         tasks = [asyncio.create_task(agents.review_code(m, panel_code)) for m in members]
         for fut in asyncio.as_completed(tasks):
             review = await fut
             reviews.append(review)
+            member = next(m for m in members if m["name"] == review.reviewer)
             yield {
                 "type": "review",
                 "review": review.model_dump(),
-                "usage": _summarize(usages).model_dump(),
+                "usage": summarize_usage(usages).model_dump(),
+                "context": _context_event(agents.review_context_stats(member, panel_code)),
             }
         rlog(
             "info",
@@ -163,14 +171,15 @@ async def run_consensus(
         yield {
             "type": "consensus",
             "consensus": consensus.model_dump(),
-            "usage": _summarize(usages).model_dump(),
+            "usage": summarize_usage(usages).model_dump(),
+            "context": _context_event(agents.consensus_context_stats(reviews)),
         }
 
         # 4. Lead verdict
         verdict = await agents.lead_verdict(spec, code, consensus.model_dump_json())
         files = verdict["files"] or coded["files"]
 
-        summary = _summarize(usages)
+        summary = summarize_usage(usages)
         rlog(
             "info",
             "run done (%.1fs): %d calls, %d/%d tokens, cost=%s",
@@ -194,6 +203,9 @@ async def run_consensus(
 
         yield {
             "type": "result",
+            # members = the panel configs actually used (retry endpoints need
+            # them to replay a reviewer against the same model).
+            "members": members,
             "result": PipelineResult(
                 spec=spec,
                 code=code,
@@ -201,6 +213,7 @@ async def run_consensus(
                 reviews=reviews,
                 consensus=consensus,
                 verdict=verdict["verdict"],
+                verdict_degraded=bool(verdict.get("degraded", False)),
                 final_code=verdict["final_code"],
                 rationale=verdict["rationale"],
                 files=files,
@@ -267,10 +280,11 @@ async def run_pipeline(
                 "type": "step",
                 "role": role_name,
                 "output": output,
-                "usage": _summarize(usages).model_dump(),
+                "usage": summarize_usage(usages).model_dump(),
+                "context": _context_event(agents.context_stats("", user, prov, mod)),
             }
 
-        summary = _summarize(usages)
+        summary = summarize_usage(usages)
         yield {
             "type": "result",
             "result": {
@@ -341,7 +355,8 @@ async def run_loop(
                     "i": i,
                     "role": role_name,
                     "output": output,
-                    "usage": _summarize(usages).model_dump(),
+                    "usage": summarize_usage(usages).model_dump(),
+                    "context": _context_event(agents.context_stats("", user, prov, mod)),
                 }
                 if "[DONE]" in output:
                     done = True
@@ -349,7 +364,7 @@ async def run_loop(
             if done:
                 break
 
-        summary = _summarize(usages)
+        summary = summarize_usage(usages)
         rlog("info", "loop done (%.1fs)", time.perf_counter() - t0)
         yield {
             "type": "result",

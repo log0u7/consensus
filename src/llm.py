@@ -108,6 +108,10 @@ async def _post_with_retry(client: httpx.AsyncClient, path: str, **kwargs) -> ht
             continue
         if r.status_code in config.RATE_LIMIT_RETRY_STATUSES:
             _maybe_auto_low_quota(r.status_code)
+        if r.status_code >= 400:
+            # Body kept short: provider error details (unknown model, bad
+            # param, quota type) are otherwise invisible after raise_for_status.
+            log.warning("provider %s on %s: %s", r.status_code, path, (r.text or "")[:300])
         r.raise_for_status()
         return r
 
@@ -159,7 +163,14 @@ def _record(
     output_tokens: int,
     cost: float | None,
     latency_ms: int,
+    cached_tokens: int = 0,
 ) -> None:
+    if cost is None:
+        # Pricing fallback (OpenRouter catalog): unknown only when the model
+        # is absent from the catalog. Never raises, never blocks.
+        from . import pricing
+
+        cost = pricing.cost_for(provider, model, input_tokens, output_tokens, cached_tokens)
     sink = _usage_sink.get()
     if sink is None:
         return
@@ -170,28 +181,41 @@ def _record(
             model=model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            cached_tokens=cached_tokens,
             cost=cost,
             latency_ms=latency_ms,
         )
     )
 
 
-def _read_usage_openai(data: dict) -> tuple[int, int, float | None]:
-    """Extract (input, output, cost) from an OpenAI-compatible response."""
+def _read_usage_openai(data: dict) -> tuple[int, int, int, float | None]:
+    """Extract (input, output, cached, cost) from an OpenAI-compatible response."""
     u = data.get("usage") or {}
     # Some providers (e.g. Zen, OpenRouter BYOK) bury real cost in cost_details.
     details = u.get("cost_details") or {}
     cost = details.get("upstream_inference_cost") or u.get("cost")
+    # Prefix-cache hits: OpenAI-style prompt_tokens_details, Anthropic-style
+    # cache_read_input_tokens (some gateways forward either shape).
+    ptd = u.get("prompt_tokens_details") or {}
+    cached = ptd.get("cached_tokens") or u.get("cache_read_input_tokens") or 0
     return (
         int(u.get("input_tokens", u.get("prompt_tokens", 0))),
         int(u.get("output_tokens", u.get("completion_tokens", 0))),
+        int(cached),
         float(cost) if cost is not None else None,
     )
 
 
-def _read_usage_anthropic(data: dict) -> tuple[int, int]:
+def _read_usage_anthropic(data: dict) -> tuple[int, int, int]:
+    """Extract (input, output, cached) from a Messages API response."""
     u = data.get("usage") or {}
-    return int(u.get("input_tokens", 0)), int(u.get("output_tokens", 0))
+    if u.get("cache_creation_input_tokens"):
+        log.debug("anthropic cache_creation_input_tokens=%s", u["cache_creation_input_tokens"])
+    return (
+        int(u.get("input_tokens", 0)),
+        int(u.get("output_tokens", 0)),
+        int(u.get("cache_read_input_tokens", 0) or 0),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -258,14 +282,23 @@ async def call_openai_compatible_history(
         "model": model,
         "messages": messages,
         "max_completion_tokens": max_tokens,
+        **provider.extra_payload,
     }
+    if provider.request_usage:
+        # Ask OpenRouter to report real usage/cost in the response body.
+        payload["usage"] = {"include": True}
     t0 = time.perf_counter()
     async with _client(provider) as c:
         r = await _post_with_retry(c, "/chat/completions", json=payload)
         data = r.json()
-    inp, out, cost = _read_usage_openai(data)
-    _record(provider_name, model, inp, out, cost, int((time.perf_counter() - t0) * 1000))
-    result = data["choices"][0]["message"]["content"]
+    inp, out, cached_tok, cost = _read_usage_openai(data)
+    _record(
+        provider_name, model, inp, out, cost, int((time.perf_counter() - t0) * 1000), cached_tok
+    )
+    # Reasoning models can return content=null when the token budget is
+    # consumed by thinking: degrade to "" so the JSON retry loop kicks in
+    # instead of crashing on None.strip().
+    result = data["choices"][0]["message"].get("content") or ""
     cache_mod.put(messages, model, result)
     return result
 
@@ -318,13 +351,17 @@ async def _call_anthropic_messages(
         "messages": messages,
     }
     if system:
-        payload["system"] = system
+        # Prompt caching: mark the (stable) system prefix as cacheable so the
+        # provider charges cache-read rates on subsequent calls.
+        payload["system"] = [
+            {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}
+        ]
     t0 = time.perf_counter()
     async with _client(provider) as c:
         r = await _post_with_retry(c, "/messages", json=payload)
         data = r.json()
-    inp, out = _read_usage_anthropic(data)
-    _record("anthropic", model, inp, out, None, int((time.perf_counter() - t0) * 1000))
+    inp, out, cached_tok = _read_usage_anthropic(data)
+    _record("anthropic", model, inp, out, None, int((time.perf_counter() - t0) * 1000), cached_tok)
     result = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
     cache_mod.put(cache_key_msgs, model, result)
     return result
@@ -345,10 +382,12 @@ async def call_anthropic_history_stream(
         "stream": True,
     }
     if system:
-        payload["system"] = system
+        payload["system"] = [
+            {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}
+        ]
 
     t0 = time.perf_counter()
-    input_tokens = output_tokens = 0
+    input_tokens = output_tokens = cached_tokens = 0
     async with _client(provider) as c:
         attempt = 0
         while True:
@@ -388,6 +427,7 @@ async def call_anthropic_history_stream(
                     if etype == "message_start":
                         u = (event.get("message") or {}).get("usage") or {}
                         input_tokens = int(u.get("input_tokens", 0))
+                        cached_tokens = int(u.get("cache_read_input_tokens", 0) or 0)
                     elif etype == "content_block_delta":
                         delta = event.get("delta") or {}
                         if delta.get("type") == "text_delta":
@@ -405,6 +445,7 @@ async def call_anthropic_history_stream(
         output_tokens,
         None,
         int((time.perf_counter() - t0) * 1000),
+        cached_tokens,
     )
 
 

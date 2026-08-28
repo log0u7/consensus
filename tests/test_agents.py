@@ -352,8 +352,44 @@ async def test_lead_verdict_degraded_on_parse_failure(monkeypatch):
     result = await agents.lead_verdict("spec", "code", "{}")
     assert result["verdict"] == "APPROVE_WITH_CHANGES"
     assert "parsed" in result["rationale"].lower() or "lead" in result["rationale"].lower()
-    assert result["final_code"] == ""
+    assert result["final_code"] == "code"  # never empty: coder's code carried over
     assert result["files"] == []
+
+
+@pytest.mark.asyncio
+async def test_lead_verdict_degraded_on_provider_error(monkeypatch):
+    """429 bursts exhausted / network errors must not kill the run."""
+
+    async def _fail(make_call, retries=2):
+        raise RuntimeError("provider exhausted retries")
+
+    monkeypatch.setattr(agents.llm, "complete_json_obj", _fail)
+    result = await agents.lead_verdict("spec", "the-coder-code", "{}")
+    assert result["verdict"] == "APPROVE_WITH_CHANGES"
+    assert "unreachable" in result["rationale"].lower()
+    assert result["final_code"] == "the-coder-code"
+    assert result["files"] == []
+
+
+@pytest.mark.asyncio
+async def test_build_consensus_degraded_on_provider_error(monkeypatch):
+    """A failing consensus aggregation degrades the report instead of raising:
+    the Lead still arbitrates and the run completes."""
+    from src.models import ConsensusReport
+
+    async def _fail(make_call, retries=2):
+        raise RuntimeError("429 retries exhausted")
+
+    monkeypatch.setattr(agents.llm, "complete_json_obj", _fail)
+    reviews = [
+        Review(reviewer="r1", ok=True, issues=[]),
+        Review(reviewer="r2", ok=True, issues=[]),
+    ]
+    report = await agents.build_consensus(reviews)
+    assert isinstance(report, ConsensusReport)
+    assert report.panel == ["r1", "r2"]
+    assert report.issues == []
+    assert "unavailable" in report.summary.lower() or "failed" in report.summary.lower()
 
 
 @pytest.mark.asyncio

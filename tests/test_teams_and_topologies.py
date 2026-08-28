@@ -48,14 +48,38 @@ def test_role_defaults():
     assert r.sandbox is False
 
 
-def test_reviewer_members_parsed():
-    team = roles_mod.load("consensus")
+def test_reviewer_members_parsed(tmp_path, monkeypatch):
+    """Explicit 'members' in a team manifest are parsed into panel members."""
+    manifest = tmp_path / "t-members.yaml"
+    manifest.write_text(
+        """
+topology: consensus
+roles:
+  reviewer:
+    members:
+      - name: deepseek-coder
+        model: zen/deepseek-v3-0324
+      - name: qwen3-coder
+        model: zen/qwen3-coder
+      - name: mimo-vl
+        model: zen/mimo-vl-7b-rl
+"""
+    )
+    monkeypatch.setattr(roles_mod, "_TEAMS_DIR", tmp_path)
+    team = roles_mod.load("t-members")
     reviewer = team.roles["reviewer"]
     assert reviewer.members is not None
     assert len(reviewer.members) == 3
     names = [m["name"] for m in reviewer.members]
     assert "deepseek-coder" in names
     assert "qwen3-coder" in names
+
+
+def test_consensus_team_is_env_driven():
+    """The shipped consensus team pins no models: routing comes from env."""
+    team = roles_mod.load("consensus")
+    assert team.roles["coder"].model == ""
+    assert team.roles["reviewer"].members is None
 
 
 # ---------------------------------------------------------------------------
@@ -95,9 +119,57 @@ async def test_consensus_topology_emits_correct_event_types(monkeypatch):
 
     types = [e["type"] for e in events]
     assert types[0] == "code"
+    # The code event carries the authoritative reviewer count for the UI.
+    from src import quota
+
+    assert events[0]["panel_size"] == len(quota.panel())
     assert "review" in types
     assert "consensus" in types
     assert types[-1] == "result"
+
+
+@pytest.mark.asyncio
+async def test_result_event_carries_members_and_degraded_flag(monkeypatch):
+    """The result event exposes the panel members (for retry endpoints) and
+    propagates the Lead's degraded flag into PipelineResult."""
+    from src import agents, quota, topologies
+
+    async def fake_write_code(spec, context="", provider=None, model=None):
+        return {"language": "python", "code": "x=1", "notes": "", "files": []}
+
+    async def fake_review(member, code):
+        from src.models import Review
+
+        return Review(reviewer=member["name"], ok=True, issues=[])
+
+    async def fake_consensus(reviews):
+        from src.models import ConsensusReport
+
+        return ConsensusReport(panel=[r.reviewer for r in reviews], summary="ok")
+
+    async def fake_verdict(spec, code, cj):
+        return {
+            "verdict": "APPROVE_WITH_CHANGES",
+            "degraded": True,
+            "rationale": "lead down",
+            "final_code": code,
+            "files": [],
+        }
+
+    monkeypatch.setattr(agents, "write_code", fake_write_code)
+    monkeypatch.setattr(agents, "review_code", fake_review)
+    monkeypatch.setattr(agents, "build_consensus", fake_consensus)
+    monkeypatch.setattr(agents, "lead_verdict", fake_verdict)
+
+    team = roles_mod.load("consensus")
+    gen = await topologies.run(team, "spec", run_id="degraded-test")
+    events = [e async for e in gen]
+
+    result_evt = next(e for e in events if e["type"] == "result")
+    assert result_evt["result"]["verdict_degraded"] is True
+    assert isinstance(result_evt["members"], list)
+    assert len(result_evt["members"]) == len(quota.panel())  # one per panel member
+    assert {"name", "provider", "model"} <= set(result_evt["members"][0])
 
 
 @pytest.mark.asyncio
@@ -200,8 +272,9 @@ async def test_loop_topology_routes_through_governor(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_consensus_topology_honours_coder_model_override(monkeypatch):
-    """A team manifest pinning coder.model must reach write_code."""
+async def test_consensus_topology_honours_coder_model_override(monkeypatch, tmp_path):
+    """A team manifest pinning coder.model must reach write_code; an
+    unpinned team leaves the choice to the env-driven quota profile."""
     from src import agents, topologies
 
     captured: dict = {}
@@ -229,7 +302,25 @@ async def test_consensus_topology_honours_coder_model_override(monkeypatch):
     monkeypatch.setattr(agents, "build_consensus", fake_consensus)
     monkeypatch.setattr(agents, "lead_verdict", fake_verdict)
 
-    team = roles_mod.load("consensus")  # pins coder: zen/deepseek-v3-0324
+    # Env-driven team: no override reaches write_code (quota decides).
+    captured.clear()
+    env_team = roles_mod.load("consensus")
+    gen = await topologies.run(env_team, "spec", run_id="gov3b")
+    [e async for e in gen]
+    assert captured["provider"] is None
+    assert captured["model"] is None
+
+    manifest = tmp_path / "t-pinned.yaml"
+    manifest.write_text(
+        """
+topology: consensus
+roles:
+  coder:
+    model: zen/deepseek-v3-0324
+"""
+    )
+    monkeypatch.setattr(roles_mod, "_TEAMS_DIR", tmp_path)
+    team = roles_mod.load("t-pinned")  # pins coder: zen/deepseek-v3-0324
     gen = await topologies.run(team, "spec", run_id="gov3")
     [e async for e in gen]
 

@@ -1,15 +1,18 @@
 """Central configuration. Everything comes from the environment.
 
 Providers and their transports:
-  zen       OpenAI-compatible  https://opencode.ai/zen/v1       Authorization: Bearer
-  openai    OpenAI-compatible  configurable base_url             Authorization: Bearer
-  anthropic Anthropic Messages https://api.anthropic.com/v1      x-api-key + anthropic-version
-  local     OpenAI-compatible  configurable base_url (Ollama...) Authorization: Bearer
+  zen        OpenAI-compatible  https://opencode.ai/zen/v1       Authorization: Bearer
+  openai     OpenAI-compatible  configurable base_url             Authorization: Bearer
+  openrouter OpenAI-compatible  https://openrouter.ai/api/v1      Authorization: Bearer
+  anthropic  Anthropic Messages https://api.anthropic.com/v1      x-api-key + anthropic-version
+  local      OpenAI-compatible  configurable base_url             Authorization: Bearer
+             (llama.cpp / Ollama / vLLM)
 
 Each provider entry maps a logical name to (base_url, auth header, transport).
 Models reference a provider by name in PANEL and role env vars.
 """
 
+import json
 import logging
 import os
 from dataclasses import dataclass, field
@@ -29,6 +32,11 @@ class Provider:
     auth_value: str  # header value (e.g. "Bearer sk-..." or raw key)
     verify_tls: "bool | str" = True  # True | False | "/path/to/ca.pem"
     extra_headers: dict = field(default_factory=dict)
+    # Extra JSON merged into every completion payload for this provider
+    # (provider-specific knobs, e.g. llama.cpp "cache_prompt": true).
+    extra_payload: dict = field(default_factory=dict)
+    # Ask the provider to return usage/cost in the response (OpenRouter).
+    request_usage: bool = False
 
 
 def _tls(raw: str) -> "bool | str":
@@ -48,6 +56,22 @@ def _bearer(key: str) -> tuple[str, str]:
 
 def _apikey(key: str) -> tuple[str, str]:
     return "x-api-key", key
+
+
+def _extra_payload(name: str, default: dict | None = None) -> dict:
+    """Parse PROVIDER_EXTRA_PAYLOAD_<NAME> (JSON) merged over `default`."""
+    payload: dict = dict(default or {})
+    raw = os.environ.get(f"PROVIDER_EXTRA_PAYLOAD_{name.upper()}", "").strip()
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                payload.update(parsed)
+            else:
+                log.warning("PROVIDER_EXTRA_PAYLOAD_%s: not a JSON object, ignored", name.upper())
+        except json.JSONDecodeError as exc:
+            log.warning("PROVIDER_EXTRA_PAYLOAD_%s: invalid JSON (%s), ignored", name.upper(), exc)
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +101,7 @@ def _build_providers() -> dict[str, Provider]:
     else:
         log.warning("ZEN_API_KEY not set; 'zen' provider unavailable")
 
-    # --- OpenAI-compatible (generic: OpenAI, OpenRouter, ...) ---------------
+    # --- OpenAI-compatible (generic: OpenAI, vLLM, any /v1 endpoint) --------
     openai_key = os.environ.get("OPENAI_API_KEY", "")
     openai_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
     if openai_key:
@@ -88,6 +112,24 @@ def _build_providers() -> dict[str, Provider]:
             transport="openai-compatible",
             auth_header=hdr,
             auth_value=val,
+            extra_payload=_extra_payload("openai"),
+        )
+
+    # --- OpenRouter (OpenAI-compatible gateway) -----------------------------
+    openrouter_key = os.environ.get("OPENROUTER_API_KEY", "")
+    openrouter_url = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").rstrip(
+        "/"
+    )
+    if openrouter_key:
+        hdr, val = _bearer(openrouter_key)
+        providers["openrouter"] = Provider(
+            name="openrouter",
+            base_url=openrouter_url,
+            transport="openai-compatible",
+            auth_header=hdr,
+            auth_value=val,
+            extra_payload=_extra_payload("openrouter"),
+            request_usage=True,  # "usage": {"include": true} -> cost in response
         )
 
     # --- Anthropic (Messages API, native streaming) -------------------------
@@ -104,7 +146,9 @@ def _build_providers() -> dict[str, Provider]:
             extra_headers={"anthropic-version": "2023-06-01"},
         )
 
-    # --- Local (Ollama / vLLM / llama.cpp, OpenAI-compatible) ---------------
+    # --- Local (llama.cpp / Ollama / vLLM, OpenAI-compatible) ---------------
+    # cache_prompt keeps the KV prefix warm server-side between calls (llama.cpp);
+    # override with PROVIDER_EXTRA_PAYLOAD_LOCAL='{}' for servers that reject it.
     local_url = os.environ.get("LOCAL_BASE_URL", "")
     if local_url:
         local_key = os.environ.get("LOCAL_API_KEY", "ollama")
@@ -116,12 +160,14 @@ def _build_providers() -> dict[str, Provider]:
             auth_header=hdr,
             auth_value=val,
             verify_tls=_tls(os.environ.get("LOCAL_CA_BUNDLE", "true")),
+            extra_payload=_extra_payload("local", default={"cache_prompt": True}),
         )
 
     if not providers:
         raise RuntimeError(
             "No provider configured. Set at least ZEN_API_KEY (free) or "
-            "OPENAI_API_KEY or ANTHROPIC_API_KEY."
+            "OPENROUTER_API_KEY or OPENAI_API_KEY or ANTHROPIC_API_KEY "
+            "or LOCAL_BASE_URL."
         )
 
     log.info("providers: %s", list(providers))
@@ -215,11 +261,15 @@ ALLOWED_ORIGINS = [
 # Models per role
 # ---------------------------------------------------------------------------
 
-# Provider:model pairs.  Format: "provider/model-id"  e.g. "zen/qwen3-coder"
-# All three default to reasoner-class models on Zen.
-CODER_MODEL = os.environ.get("CODER_MODEL", "zen/deepseek-v3-0324")
-CONSENSUS_MODEL = os.environ.get("CONSENSUS_MODEL", "zen/deepseek-r1-0528")
-LEAD_MODEL = os.environ.get("LEAD_MODEL", "zen/deepseek-r1-0528")
+# Provider:model pairs.  Format: "provider/model-id"  e.g. "zen/big-pickle".
+# Defaults favour free-tier models; override per environment. `make setup`
+# probes your configured providers and writes the exact ids into .env.
+CODER_MODEL = os.environ.get("CODER_MODEL", "zen/big-pickle")
+CONSENSUS_MODEL = os.environ.get("CONSENSUS_MODEL", "zen/deepseek-v4-flash-free")
+LEAD_MODEL = os.environ.get("LEAD_MODEL", "zen/deepseek-v4-flash-free")
+# Chat/exploration model: empty -> falls back to LEAD_MODEL. Point it at a
+# local model (e.g. "local/qwen3-8b") for free, private exploration chats.
+CHAT_MODEL = os.environ.get("CHAT_MODEL", "")
 
 CODER_MAX_TOKENS = int(os.environ.get("CODER_MAX_TOKENS", "8000"))
 REVIEW_MAX_TOKENS = int(os.environ.get("REVIEW_MAX_TOKENS", "8000"))
@@ -241,7 +291,7 @@ CONSENSUS_FALLBACK = _parse_fallback(os.environ.get("CONSENSUS_FALLBACK", ""))
 LEAD_FALLBACK = _parse_fallback(os.environ.get("LEAD_FALLBACK", ""))
 
 # Low-quota degraded profile (Lead is never downgraded)
-LOW_QUOTA_MODEL = os.environ.get("LOW_QUOTA_MODEL", "zen/deepseek-v3-0324")
+LOW_QUOTA_MODEL = os.environ.get("LOW_QUOTA_MODEL", CODER_MODEL)
 LOW_QUOTA_PANEL_SIZE = int(os.environ.get("LOW_QUOTA_PANEL_SIZE", "2"))
 
 # ---------------------------------------------------------------------------
@@ -251,12 +301,13 @@ LOW_QUOTA_PANEL_SIZE = int(os.environ.get("LOW_QUOTA_PANEL_SIZE", "2"))
 # when using the "provider/model" convention).
 # ---------------------------------------------------------------------------
 
-_VALID_TRANSPORTS = set(("zen", "openai", "anthropic", "local"))
+_VALID_TRANSPORTS = set(("zen", "openai", "openrouter", "anthropic", "local"))
 
+# Default panel: the only universally free Zen coding model today.
+# NOTE: a single-model panel gives trivial consensus - run `make setup` to
+# write a real REVIEW_PANEL from your providers (2-4 *different* models).
 _DEFAULT_PANEL = [
-    {"name": "deepseek-coder", "provider": "zen", "model": "deepseek-v3-0324"},
-    {"name": "qwen3-coder", "provider": "zen", "model": "qwen3-coder"},
-    {"name": "mimo-vl", "provider": "zen", "model": "mimo-vl-7b-rl"},
+    {"name": "coder", "provider": "zen", "model": "big-pickle"},
 ]
 
 
@@ -265,6 +316,10 @@ def _parse_panel(raw: str) -> list[dict]:
 
     Falls back to the default Zen panel when empty or fully invalid.
     Skips malformed entries with a warning (resilient by design).
+
+    Ollama model IDs may contain colons (e.g. ``local/qwen:7b``).  The last
+    colon‑separated segment is treated as ``max_tokens`` only when it is a
+    pure integer >= 256; otherwise it is kept as part of the model name.
     """
     raw = (raw or "").strip()
     if not raw:
@@ -276,12 +331,23 @@ def _parse_panel(raw: str) -> list[dict]:
         if not entry:
             continue
         parts = [p.strip() for p in entry.split(":")]
-        if len(parts) not in (2, 3) or not all(parts[:2]):
+        # Detect trailing :N where N is an integer >= 256 (max_tokens).
+        # Ollama model IDs like ``local/qwen:7b`` have a colon in the model
+        # name; if the trailing part is not a pure integer we keep it as
+        # part of the model rather than rejecting the entry.
+        trailing_is_max = len(parts) > 2 and parts[-1].isdigit() and int(parts[-1]) >= 256
+        if trailing_is_max:
+            # :N is max_tokens: name | provider/model | N
+            name = parts[0]
+            provider_model = ":".join(parts[1:-1])
+            max_tokens = int(parts[-1])
+        else:
+            # No valid trailing max_tokens: name | provider/model (may contain ':')
+            name = parts[0]
+            provider_model = ":".join(parts[1:]) if len(parts) > 1 else ""
+
+        if not name or "/" not in provider_model:
             log.warning("REVIEW_PANEL: skipping malformed entry %r", entry)
-            continue
-        name, provider_model = parts[0], parts[1]
-        if "/" not in provider_model:
-            log.warning("REVIEW_PANEL: entry %r missing 'provider/model' format, skipping", entry)
             continue
         provider, model = provider_model.split("/", 1)
         if provider not in PROVIDERS:
@@ -292,11 +358,8 @@ def _parse_panel(raw: str) -> list[dict]:
             )
             continue
         member: dict = {"name": name, "provider": provider, "model": model}
-        if len(parts) == 3:
-            try:
-                member["max_tokens"] = int(parts[2])
-            except ValueError:
-                log.warning("REVIEW_PANEL: ignoring non-integer max_tokens in %r", entry)
+        if trailing_is_max:
+            member["max_tokens"] = max_tokens
         out.append(member)
 
     if not out:

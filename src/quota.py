@@ -38,6 +38,14 @@ def lead_model() -> tuple[str, str]:
     return resolve_name(config.LEAD_MODEL)
 
 
+def chat_model() -> tuple[str, str]:
+    """Model for exploration chat: CHAT_MODEL when set (e.g. a local model),
+    otherwise the Lead model."""
+    if config.CHAT_MODEL:
+        return resolve_name(config.CHAT_MODEL)
+    return lead_model()
+
+
 def panel() -> list[dict]:
     return config.LOW_QUOTA_PANEL if _low_quota else config.PANEL
 
@@ -47,11 +55,13 @@ def profile() -> dict:
     coder_prov, coder_mod = coder_model()
     cons_prov, cons_mod = consensus_model()
     lead_prov, lead_mod = lead_model()
+    chat_prov, chat_mod = chat_model()
     return {
         "low_quota": _low_quota,
         "coder_model": f"{coder_prov}/{coder_mod}",
         "consensus_model": f"{cons_prov}/{cons_mod}",
         "lead_model": f"{lead_prov}/{lead_mod}",  # always protected
+        "chat_model": f"{chat_prov}/{chat_mod}",
         "panel": [p["name"] for p in panel()],
         "low_quota_model": config.LOW_QUOTA_MODEL,
         "low_quota_panel": [p["name"] for p in config.LOW_QUOTA_PANEL],

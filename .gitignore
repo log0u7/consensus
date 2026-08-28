@@ -1,7 +1,6 @@
 .env
 .env.active
 .env.*
-!.env.example
 *.pem
 __pycache__/
 *.pyc
@@ -18,3 +17,5 @@ docs-projet/*
 !docs-projet/.gitkeep
 !docs-projet/README.md
 rag.db
+pricing.db
+.opencode/

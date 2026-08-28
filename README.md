@@ -61,25 +61,37 @@ All LLM calls: httpx -> provider, routed through `governor.py`
 
 ## Providers
 
-| Name        | Transport          | Default base URL                          |
-|-------------|--------------------|-------------------------------------------|
-| `zen`       | OpenAI-compatible  | `https://opencode.ai/zen/v1` (free)       |
-| `openai`    | OpenAI-compatible  | configurable `OPENAI_BASE_URL`            |
-| `anthropic` | Anthropic Messages | `https://api.anthropic.com/v1`            |
-| `local`     | OpenAI-compatible  | `LOCAL_BASE_URL` (Ollama, vLLM, ...)      |
+| Name         | Transport          | Default base URL                          |
+|--------------|--------------------|-------------------------------------------|
+| `zen`        | OpenAI-compatible  | `https://opencode.ai/zen/v1` (free)       |
+| `openrouter` | OpenAI-compatible  | `https://openrouter.ai/api/v1`            |
+| `openai`     | OpenAI-compatible  | configurable `OPENAI_BASE_URL`            |
+| `anthropic`  | Anthropic Messages | `https://api.anthropic.com/v1`            |
+| `local`      | OpenAI-compatible  | `LOCAL_BASE_URL` (llama.cpp, Ollama, ...) |
 
-Models use the `provider/model-id` format: `zen/deepseek-r1-0528`,
-`anthropic/claude-opus-latest`, `local/qwen2.5-coder`.
+Models use the `provider/model-id` format: `zen/big-pickle`,
+`anthropic/claude-opus-latest`, `local/qwen3-8b`.
 
-## Quickstart (Zen, free)
+Costs and context windows are derived at runtime from OpenRouter's public
+catalog (cached in `pricing.db`); local models cost 0. Prompt caching is
+native: Anthropic gets `cache_control` on the system prefix, llama.cpp gets
+`cache_prompt`, and cached tokens are surfaced in the UI (`cached input`).
 
-1. Get a free Zen key at https://opencode.ai.
-2. Configure:
+## Quickstart
+
+The fastest path is the setup wizard: it imports keys already saved by
+opencode, probes each provider, suggests a routing and writes `.env`.
+
+1. Configure:
    ```
-   cp .env.example .env
-   # edit .env: set ZEN_API_KEY and PG_PASSWORD (any string, e.g. "changeme")
+   make setup
    ```
-3. Start:
+   or by hand:
+   ```
+   cp env.example .env
+   # edit .env: one provider key is enough (e.g. ZEN_API_KEY, free)
+   ```
+2. Start:
    ```
    make up
    ```
@@ -90,9 +102,7 @@ Models use the `provider/model-id` format: `zen/deepseek-r1-0528`,
 ```
 git clone https://github.com/log0u7/consensus.git
 cd consensus
-cp .env.example .env
-# Required: ZEN_API_KEY and PG_PASSWORD
-# Optional: CODER_MODEL, LEAD_MODEL, REVIEW_PANEL (see .env.example)
+make setup          # or: cp env.example .env and set one provider key
 make up
 ```
 
@@ -103,6 +113,55 @@ To run a task on the CLI instead of the UI:
 ```
 make run SPEC="Write a Python function that validates an email address"
 ```
+
+### Free demo mode (zero cost)
+
+`make setup-auto` writes a complete, non-interactive **free-tier test
+configuration**. All you need is one free OpenRouter key
+(https://openrouter.ai). The wizard:
+
+- imports keys already saved by opencode when present,
+- routes every role to free models: `cohere/north-mini-code:free` as coder,
+  `z-ai/glm-5.2:free` as consensus + lead, and a review panel of 3 distinct
+  free models with a 32k output budget each (reasoning models think before
+  answering),
+- raises the 429 retry budget (free pools answer 429 in bursts),
+- generates the compose `PG_PASSWORD` and seeds the pricing catalog
+  (`pricing.db`) so costs show up from the first run.
+
+Expected behaviour on the free tier - by design, never a crash:
+
+- Runs take 1-3 minutes; 429 bursts are retried automatically.
+- A reviewer whose pool is saturated may fail and is simply skipped
+  (`ok=False`); consensus is computed over whoever answered.
+- If the consensus aggregation or the Lead itself is unreachable after
+  retries, the run **still completes**: a degraded consensus report and/or a
+  degraded verdict (carrying the coder's code) is produced instead. A
+  degraded verdict means the free pool was saturated upstream, not an app
+  error.
+- The Retry buttons act on live sessions: after an app/container restart
+  they return 404 - re-run the task.
+- To lift the limits: add credits to your OpenRouter account (raises the
+  per-model `:free` daily cap), add a free Zen key with `make setup`, or
+  switch to the paid routing below.
+
+### Paid testing routing
+
+`make setup-paid` rewrites the routing (keys and `PG_PASSWORD` are kept) to
+normal OpenRouter models - one vendor per role, no free-pool 429 noise:
+
+| Role      | Model                                       |
+|-----------|---------------------------------------------|
+| coder     | `openai/gpt-5.4-mini`                       |
+| consensus | `google/gemini-3.5-flash-lite`              |
+| lead      | `openai/gpt-5.3-codex`                      |
+| panel     | `gemini-3.5-flash-lite`, `gpt-5.4-mini`, `deepseek-v4-flash-latest` |
+
+Indicative cost per small test run: ~$0.03-0.10 (real costs show up in the
+UI and CLI summary). Requires a positive OpenRouter credit balance - the
+wizard validates each routing model and flags `402 Payment Required`
+(add credits at openrouter.ai/settings/credits). `make setup-auto` switches
+back to the free demo at any time.
 
 To add a new domain without touching application code:
 ```
@@ -190,6 +249,9 @@ CACHE_DB_PATH=cache.db
 
 | Target                  | Action                                            |
 |-------------------------|---------------------------------------------------|
+| `make setup`            | Interactive provider setup (writes `.env`)        |
+| `make setup-auto`       | Tuned free-tier test `.env`, no questions asked   |
+| `make setup-check`      | Probe configured providers, no changes            |
 | `make up` / `start`     | Start the stack, detached (builds if needed)      |
 | `make down` / `stop`    | Stop and remove the stack                         |
 | `make update` / `reload`| Rebuild and recreate the app after code changes   |
@@ -226,13 +288,15 @@ Toggle low-quota manually from the header pill or `POST /api/quota`.
 
 ## Configuration reference
 
-All in `.env`. See `.env.example` for the full reference with comments.
+All in `.env`. See `env.example` for the full reference with comments, or run
+`make setup` to have it written for you.
 
 | Variable            | Default                    | Purpose                             |
 |---------------------|----------------------------|-------------------------------------|
-| `ZEN_API_KEY`       | (required for Zen)         | Zen provider key                    |
-| `CODER_MODEL`       | `zen/deepseek-v3-0324`     | Coder role model                    |
-| `LEAD_MODEL`        | `zen/deepseek-r1-0528`     | Lead role model                     |
+| `ZEN_API_KEY`       | (one provider is required) | Zen provider key                    |
+| `CODER_MODEL`       | `zen/big-pickle`           | Coder role model                    |
+| `LEAD_MODEL`        | `zen/deepseek-v4-flash-free` | Lead role model                   |
+| `CHAT_MODEL`        | (empty -> `LEAD_MODEL`)    | Chat/exploration model              |
 | `REVIEW_PANEL`      | (Zen default panel)        | `name:provider/model[:max_tokens]`  |
 | `SANDBOX_ENGINE`    | `docker`                   | `docker`, `subprocess`, or `none`   |
 | `RESPONSE_CACHE`    | `0`                        | Set `1` to enable local cache       |
@@ -247,8 +311,8 @@ All in `.env`. See `.env.example` for the full reference with comments.
 - Input sizes capped before any billable call.
 - Artifact paths sanitized against zip-slip (ingestion + archive).
 - Sandbox: Docker `--network none`, read-only FS, resource caps, no secrets mounted.
-- No secrets baked into the image; `.gitignore` excludes all `.env*` files
-  except `.env.example`.
+- No secrets baked into the image; `.gitignore` excludes all `.env*` files.
+  The tracked template is `env.example` (placeholder values only).
 
 ## File structure
 
@@ -259,13 +323,14 @@ consensus/
   docker-compose.yml / docker-compose.dev.yml
   Dockerfile
   requirements.txt / requirements-dev.txt
-  .env.example
+  env.example      tracked env template (placeholders only)
   teams/          team manifests (YAML)
   skills/         skill files (SKILL.md per domain)
   docs-projet/    RAG documents (drop files here)
   src/
     config.py     env + provider registry
     providers.py  resolve() + capability metadata
+    pricing.py    dynamic pricing + context windows (OpenRouter catalog)
     llm.py        httpx transports (openai-compatible + Anthropic + SSE)
     governor.py   rate-limit + retry + fallback
     agents.py     coder, reviewer, consensus, lead
@@ -274,6 +339,7 @@ consensus/
     topologies.py consensus / pipeline / loop
     sandbox.py    Docker / subprocess / no-op sandbox
     cache.py      local response cache
+    setup.py      interactive provider setup wizard (`make setup`)
     context.py    AgentContext builder (stable prefix)
     skills.py     SKILL.md loader
     mcp_client.py MCP server manager

@@ -146,11 +146,8 @@ class ChatScreen(Screen):
                     if buffer:
                         log.write(f"\n[bold]Lead:[/] {esc(buffer)}")
                     if usage:
-                        log.write(
-                            f"\n[dim]--- cost: ${usage.get('cost', 0):.4f} "
-                            f"({usage.get('input_tokens', 0)} in / "
-                            f"{usage.get('output_tokens', 0)} out)[/]"
-                        )
+                        log.write(f"\n[dim]{_usage_line(usage)}[/]")
+                        self.query_one(StatusBar).add_usage(usage)
                 elif "error" in event:
                     log.write(f"\n[bold red]Error: {esc(event['error'])}[/]")
         except Exception as exc:
@@ -170,10 +167,18 @@ class ChatScreen(Screen):
             for f in files:
                 log.write(f"  {esc(f.get('path', '?'))}")
             if usage:
-                log.write(
-                    f"[dim]  cost: ${usage.get('cost', 0):.4f} "
-                    f"({usage.get('input_tokens', 0)} in / "
-                    f"{usage.get('output_tokens', 0)} out)[/]"
-                )
+                log.write(f"[dim]  {_usage_line(usage)}[/]")
+                self.query_one(StatusBar).add_usage(usage)
         except Exception as exc:
             log.write(f"\n[bold red]Regeneration failed: {esc(str(exc))}[/]")
+
+
+def _usage_line(usage: dict[str, Any]) -> str:
+    cost_known = usage.get("cost_known")
+    cost = f"${usage.get('cost', 0):.4f}" if cost_known else "cost n/a"
+    cached = usage.get("cached_tokens", 0)
+    cached_txt = f", {cached} cached" if cached else ""
+    return (
+        f"cost: {cost} ({usage.get('input_tokens', 0)} in / "
+        f"{usage.get('output_tokens', 0)} out{cached_txt})"
+    )

@@ -51,6 +51,10 @@ StatusBar {
     color: $warning;
     text-style: bold;
 }
+.status-cost {
+    padding: 0 1;
+    color: $text-disabled;
+}
 .status-version {
     padding: 0 1;
     color: $text-disabled;

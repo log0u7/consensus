@@ -10,11 +10,25 @@
 <style>
   :root {
     --bg: #0e1116; --panel: #161b22; --panel2: #1c232c; --border: #2a313c;
-    --fg: #d7dde5; --muted: #8a94a3; --accent: #5aa0ff; --accent2: #7ee0a0;
-    --crit: #ff6b6b; --high: #ff9f43; --med: #ffd166; --low: #7ee0a0;
-    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    --sans: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    --fg: #d7dde5; --muted: #8a94a3; --accent: #22C55E; --accent2: #38BF2F;
+    --crit: #FF6B6B; --high: #FF9F43; --med: #FFD166; --low: #7EE0A0;
+    --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: 'IBM Plex Sans', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
   }
+@font-face {
+  font-family: 'IBM Plex Sans';
+  src: url('/vendor/fonts/IBMPlexSans-Regular.woff2') format('woff2'),
+       url('/vendor/fonts/IBMPlexSans-Regular.woff') format('woff');
+  font-weight: normal;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/vendor/fonts/JetBrainsMono-Regular.woff2') format('woff2'),
+       url('/vendor/fonts/JetBrainsMono-Regular.woff') format('woff');
+  font-weight: normal;
+  font-style: normal;
+}
   * { box-sizing: border-box; }
   html, body { height: 100%; }
   body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--sans);
@@ -51,6 +65,23 @@
   label.chk { color: var(--muted); font-size: 13px; display: flex; gap: 6px; align-items: center; cursor: pointer; }
   .hint { color: var(--muted); font-size: 12px; }
   .status { color: var(--accent); font-size: 13px; margin-top: 10px; min-height: 18px; }
+  .progress { margin-top: 8px; }
+  .progress-track { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+  .progress-fill { height: 100%; width: 0%; background: var(--accent); transition: width .4s ease; }
+  .progress-fill.error { background: #d9534f; }
+  .progress-steps { display: flex; gap: 10px; margin-top: 5px; font-size: 11px; color: var(--muted); flex-wrap: wrap; }
+  .progress-steps .step.current { color: var(--accent); font-weight: 600; }
+  .progress-steps .step.done { color: var(--text); }
+  .progress-steps .step.fail { color: #d9534f; }
+  .btn-retry { margin-left: auto; font-size: 11px; padding: 2px 8px; }
+  .msg-retry { margin-top: 6px; }
+  .diff { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.5; }
+  .dl { display: flex; white-space: pre; }
+  .dl .dn { width: 42px; min-width: 42px; text-align: right; padding: 0 6px; color: var(--muted); user-select: none; }
+  .dl .ds { width: 14px; min-width: 14px; user-select: none; }
+  .dl .dc { flex: 1; overflow-wrap: anywhere; }
+  .dl.del { background: rgba(217, 83, 79, .16); }
+  .dl.add { background: rgba(92, 184, 92, .16); }
   .empty { color: var(--muted); font-size: 13px; padding: 6px; }
 
   pre { margin: 0; padding: 12px; background: #0b0e13; border: 1px solid var(--border); border-radius: 6px;
@@ -151,6 +182,22 @@
   <span class="sub">multi-agent code review</span>
   <span class="spacer"></span>
 
+  <!-- Context pill -->
+  <span class="pill-wrap" id="ctxWrap" style="display:none">
+    <button class="pill" id="ctxPill" aria-haspopup="dialog" aria-expanded="false" title="Prompt context size vs model window">
+      <span class="dot"></span><span id="ctxLabel"></span>
+    </button>
+    <div class="pop" id="ctxPop" role="dialog" aria-label="Context usage">
+      <h3>Context</h3>
+      <div class="line"><span class="k">model</span> <span id="ctxModel"></span></div>
+      <div class="line"><span class="k">system (cacheable)</span> <span id="ctxSys"></span></div>
+      <div class="line"><span class="k">task (volatile)</span> <span id="ctxUser"></span></div>
+      <div class="line"><span class="k">total</span> <span id="ctxTotal"></span></div>
+      <div class="line"><span class="k">model window</span> <span id="ctxWindow"></span></div>
+      <div class="line"><span class="k">est. input cost</span> <span id="ctxCost"></span></div>
+    </div>
+  </span>
+
   <!-- Usage / cost pill -->
   <span class="pill-wrap" id="usageWrap" style="display:none">
     <button class="pill" id="usagePill" aria-haspopup="dialog" aria-expanded="false" title="Run usage and cost">
@@ -160,8 +207,10 @@
       <h3>Usage</h3>
       <div class="line"><span class="k">calls</span> <span id="uCalls">0</span></div>
       <div class="line"><span class="k">input tokens</span> <span id="uIn">0</span></div>
+      <div class="line"><span class="k">cached input</span> <span id="uCached">0</span></div>
       <div class="line"><span class="k">output tokens</span> <span id="uOut">0</span></div>
       <div class="line"><span class="k">cost</span> <span id="uCost">—</span></div>
+      <div id="uProviders" class="sub"></div>
       <div id="uSteps" class="sub"></div>
     </div>
   </span>
@@ -175,6 +224,7 @@
       <h3>Verdict</h3>
       <div class="line"><span class="k">decision</span> <span id="verdictDecision"></span></div>
       <div class="rationale" id="verdictRationale"></div>
+      <div class="msg-retry"><button id="leadRetryBtn" class="act" disabled title="Re-run the Lead against the same code and consensus (refresh the verdict)">Retry lead</button></div>
     </div>
   </span>
 
@@ -189,6 +239,7 @@
       <div class="line"><span class="k">coder</span> <span id="qCoder"></span></div>
       <div class="line"><span class="k">consensus</span> <span id="qConsensus"></span></div>
       <div class="line"><span class="k">lead (protected)</span> <span id="qLead"></span></div>
+      <div class="line"><span class="k">chat</span> <span id="qChat"></span></div>
       <div class="line"><span class="k">panel</span> <span id="qPanel"></span></div>
       <div class="quota-toggle">
         <span>Low-quota mode</span>
@@ -213,6 +264,10 @@
           <label class="chk"><input type="checkbox" id="useRag"> RAG</label>
         </div>
         <div class="status" id="status"></div>
+        <div class="progress" id="progress" style="display:none" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Pipeline progress">
+          <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+          <div class="progress-steps" id="progressSteps"></div>
+        </div>
       </div>
     </div>
 
@@ -220,8 +275,9 @@
       <h2>Code</h2>
       <div class="body">
         <div class="tabs">
-          <button id="tabFinal" class="active">Final (Lead)</button>
           <button id="tabDraft">Draft (Coder)</button>
+          <button id="tabFinal" class="active">Final (Lead)</button>
+          <button id="tabDiff" disabled>Diff</button>
           <span class="spacer"></span>
           <button id="copyBtn" class="act" disabled>Copy</button>
           <button id="dlBtn" class="act" disabled>Download</button>
@@ -269,6 +325,9 @@
 const $ = (id) => document.getElementById(id);
 let sessionId = null;
 let draftCode = "", finalCode = "";
+let liveReviews = [];        // current panel state (run + retries)
+let retryingReviewer = null; // reviewer currently being retried
+let retryingLead = false;
 let codeLang = "", lastResult = null;
 let projectFiles = [];   // [{path, language, content}] when multi-file
 let PANEL_SIZE = 3;
@@ -304,16 +363,100 @@ function closeAllPops(){
 document.addEventListener("click", (e) => { if (!e.target.closest(".pill-wrap")) closeAllPops(); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeAllPops(); });
 
+// --- Context pill ----------------------------------------------------------
+function fmtTok(n){
+  if (n == null) return "?";
+  return n >= 10000 ? (n/1000).toFixed(1) + "k" : String(n);
+}
+function renderContext(ctx){
+  if (!ctx || !ctx.total_tokens){ $("ctxWrap").style.display = "none"; return; }
+  $("ctxWrap").style.display = "";
+  const win = ctx.context_window;
+  $("ctxLabel").textContent = "ctx " + fmtTok(ctx.total_tokens) + (win ? "/" + fmtTok(win) : "");
+  $("ctxModel").textContent = ctx.model || "?";
+  $("ctxSys").textContent = fmtTok(ctx.system_tokens);
+  $("ctxUser").textContent = fmtTok(ctx.user_tokens);
+  $("ctxTotal").textContent = ctx.total_tokens;
+  $("ctxWindow").textContent = win ? win : "unknown";
+  $("ctxCost").textContent = (ctx.est_input_cost != null)
+    ? "~$" + Number(ctx.est_input_cost).toFixed(5)
+    : "n/a";
+}
+$("ctxPill").onclick = (e) => { e.stopPropagation(); openPop("ctxPop","ctxPill"); };
+
+// --- Pipeline progress bar (Task card) -------------------------------------
+const PROGRESS_STEPS = ["Coder", "Panel", "Consensus", "Lead"];
+let progressState = null;
+
+function _progressPct(){
+  const st = progressState;
+  if (st.stage === "coder") return 10;
+  if (st.stage === "panel") return Math.min(75, 25 + Math.round(50 * st.reviews / Math.max(st.panel, 1)));
+  if (st.stage === "consensus") return 80;
+  if (st.stage === "lead") return 90;
+  return 100;
+}
+function renderProgress(){
+  if (!progressState){ $("progress").style.display = "none"; return; }
+  $("progress").style.display = "";
+  const st = progressState;
+  const pct = _progressPct();
+  $("progressFill").style.width = pct + "%";
+  $("progress").setAttribute("aria-valuenow", String(pct));
+  const labels = { Coder: "Coder", Panel: `Panel (${st.reviews}/${st.panel})`, Consensus: "Consensus", Lead: "Lead" };
+  const idx = PROGRESS_STEPS.indexOf(st.stage === "done" ? "" : st.stage);
+  $("progressSteps").innerHTML = PROGRESS_STEPS.map((s, i) => {
+    let cls = "step pending";
+    if (st.stage === "done" || i < idx) cls = "step done";
+    else if (i === idx) cls = "step current";
+    const mark = cls.includes("done") ? "\u2713 " : "";
+    return `<span class="${cls}">${mark}${labels[s]}</span>`;
+  }).join("");
+}
+function resetProgress(){
+  progressState = { stage: "coder", reviews: 0, panel: PANEL_SIZE };
+  $("progressFill").classList.remove("error");
+  renderProgress();
+}
+function setProgress(stage){
+  if (!progressState) progressState = { stage, reviews: 0, panel: PANEL_SIZE };
+  progressState.stage = stage;
+  renderProgress();
+}
+function progressReviewDone(){
+  if (!progressState) return;
+  progressState.reviews += 1;
+  renderProgress();
+}
+function failProgress(){
+  if (!progressState) return;
+  $("progressFill").classList.add("error");
+}
+
 // --- Usage / cost pill -----------------------------------------------------
 function fmtCost(cs){ return cs.cost_known ? ("$" + Number(cs.cost).toFixed(5)) : "cost n/a"; }
+function renderProviders(cs){
+  const el = $("uProviders");
+  const rows = (cs.by_provider || []).map(p => {
+    const c = p.cost_known ? ("$" + Number(p.cost).toFixed(5)) : "n/a";
+    const cached = p.cached_tokens ? " · " + p.cached_tokens + " cached" : "";
+    return `<div class="line"><span class="k">${escapeHtml(p.provider)}</span> `
+      + `<span>${p.calls} calls · ${p.input_tokens}/${p.output_tokens}${cached} · ${c}</span></div>`;
+  }).join("");
+  el.innerHTML = rows
+    ? "<div class='k' style='margin-bottom:4px'>per provider (in/out · cost)</div>" + rows
+    : "";
+}
 function renderCost(cs){
   if (!cs || !cs.calls){ $("usageWrap").style.display = "none"; return; }
   $("usageWrap").style.display = "";
   $("usageLabel").textContent = `${cs.calls} calls \u00b7 ${fmtCost(cs)}`;
   $("uCalls").textContent = cs.calls;
   $("uIn").textContent = cs.input_tokens;
+  $("uCached").textContent = cs.cached_tokens || 0;
   $("uOut").textContent = cs.output_tokens;
   $("uCost").textContent = fmtCost(cs);
+  renderProviders(cs);
 }
 // Per-step breakdown (from the final result's usages array).
 function renderUsageSteps(usages){
@@ -342,6 +485,7 @@ function renderQuota(profile){
   $("qCoder").textContent = profile.coder_model || "";
   $("qConsensus").textContent = profile.consensus_model || "";
   $("qLead").textContent = profile.lead_model || "";
+  $("qChat").textContent = profile.chat_model || "";
   $("qPanel").textContent = (profile.panel || []).join(", ");
 }
 function markRateLimited(){
@@ -378,10 +522,12 @@ function renderPanel(reviews){
     const d = document.createElement("details");
     d.className = "reviewer";
     const meta = r.ok ? `${(r.issues||[]).length} issues` : "failed";
+    const busy = retryingReviewer === r.reviewer;
+    const retryBtn = `<button class="act btn-retry" data-reviewer="${escapeHtml(r.reviewer)}"${busy ? " disabled" : ""} title="Re-run this reviewer against the same code, then replay consensus + lead">${busy ? "Retrying..." : "Retry"}</button>`;
     d.innerHTML =
       `<summary><span class="dot ${r.ok?'ok':'ko'}"></span>`
       + `<span class="rev-name">${escapeHtml(r.reviewer)}</span>`
-      + `<span class="rev-meta">${meta}</span></summary>`;
+      + `<span class="rev-meta">${meta}</span>${retryBtn}</summary>`;
     const body = document.createElement("div");
     body.className = "rev-body";
     if (!r.ok){
@@ -403,6 +549,9 @@ function renderPanel(reviews){
     }
     d.appendChild(body);
     el.appendChild(d);
+  });
+  el.querySelectorAll(".btn-retry").forEach(b => {
+    b.onclick = (e) => { e.stopPropagation(); retryReviewer(b.dataset.reviewer); };
   });
 }
 
@@ -469,12 +618,72 @@ function setCodeTab(which){
   currentTab = which;
   $("tabFinal").classList.toggle("active", which==="final");
   $("tabDraft").classList.toggle("active", which==="draft");
+  $("tabDiff").classList.toggle("active", which==="diff");
   // In multi-file mode the Final tab shows the selected file; Draft shows blob.
   if (which==="final" && projectFiles.length){
     showSelectedFile();
     return;
   }
+  if (which==="diff"){
+    renderDiff();
+    return;
+  }
   renderCodeText(which==="final" ? finalCode : draftCode, codeLang);
+}
+
+// --- Diff (Draft -> Final), GitHub-style, dependency-free -------------------
+let diffText = "";  // plain +/- text version for Copy/Download on the Diff tab
+
+function computeLineDiff(a, b){
+  // Classic LCS line diff. Returns rows {t: "-"|"+"|" ", la, lb, text}
+  // (la/lb = 1-based source line numbers, absent on inserted/deleted lines).
+  const A = a.split("\n"), B = b.split("\n");
+  const n = A.length, m = B.length;
+  const w = m + 1;
+  const dp = new Uint32Array((n + 1) * (m + 1));
+  for (let i = n - 1; i >= 0; i--){
+    for (let j = m - 1; j >= 0; j--){
+      dp[i * w + j] = A[i] === B[j]
+        ? dp[(i + 1) * w + j + 1] + 1
+        : Math.max(dp[(i + 1) * w + j], dp[i * w + j + 1]);
+    }
+  }
+  const rows = [];
+  let i = 0, j = 0;
+  while (i < n && j < m){
+    if (A[i] === B[j]){ rows.push({t: " ", la: i + 1, lb: j + 1, text: A[i]}); i++; j++; }
+    else if (dp[(i + 1) * w + j] >= dp[i * w + j + 1]){ rows.push({t: "-", la: i + 1, text: A[i]}); i++; }
+    else { rows.push({t: "+", lb: j + 1, text: B[j]}); j++; }
+  }
+  while (i < n){ rows.push({t: "-", la: i + 1, text: A[i]}); i++; }
+  while (j < m){ rows.push({t: "+", lb: j + 1, text: B[j]}); j++; }
+  return rows;
+}
+
+function renderDiff(){
+  const pre = $("code");
+  if (draftCode === finalCode){
+    diffText = "";
+    pre.innerHTML = '<code class="empty">No changes by the Lead: the final code matches the draft.</code>';
+    return;
+  }
+  if (draftCode.split("\n").length > 1000 || finalCode.split("\n").length > 1000){
+    diffText = "";
+    pre.innerHTML = '<code class="empty">Diff too large to render (&gt;1000 lines). Use the Final tab.</code>';
+    return;
+  }
+  const rows = computeLineDiff(draftCode, finalCode);
+  diffText = rows.map(r => (r.t === " " ? "  " : r.t + " ") + r.text).join("\n");
+  let html = '<div class="diff">';
+  for (const r of rows){
+    const cls = r.t === "-" ? "del" : r.t === "+" ? "add" : "ctx";
+    html += `<div class="dl ${cls}">`
+      + `<span class="dn">${r.la || ""}</span>`
+      + `<span class="dn">${r.lb || ""}</span>`
+      + `<span class="ds">${r.t}</span>`
+      + `<span class="dc">${escapeHtml(r.text) || " "}</span></div>`;
+  }
+  pre.innerHTML = html + "</div>";
 }
 
 // Multi-file: populate the file selector and show the first file.
@@ -496,6 +705,7 @@ function showSelectedFile(){
 $("fileSel").onchange = showSelectedFile;
 
 function currentCode(){
+  if (currentTab==="diff") return diffText || finalCode;
   if (currentTab==="final" && projectFiles.length){
     const f = projectFiles[parseInt($("fileSel").value||"0",10)]; return f ? f.content : "";
   }
@@ -503,6 +713,7 @@ function currentCode(){
 }
 $("tabFinal").onclick = () => setCodeTab("final");
 $("tabDraft").onclick = () => setCodeTab("draft");
+$("tabDiff").onclick = () => setCodeTab("diff");
 
 // Download the project as an archive in the selected format (built server-side).
 async function downloadArchive(){
@@ -566,7 +777,11 @@ function buildReport(r){
   if (cs){
     lines.push("", `## Usage`, "");
     const cost = cs.cost_known ? ("$" + cs.cost) : "n/a";
-    lines.push(`- ${cs.calls} calls, ${cs.input_tokens} in / ${cs.output_tokens} out tokens, cost ${cost}`);
+    lines.push(`- ${cs.calls} calls, ${cs.input_tokens} in (${cs.cached_tokens || 0} cached) / ${cs.output_tokens} out tokens, cost ${cost}`);
+    (cs.by_provider || []).forEach(p => {
+      const pc = p.cost_known ? ("$" + Number(p.cost).toFixed(5)) : "n/a";
+      lines.push(`  - ${p.provider}: ${p.calls} calls, ${p.input_tokens}/${p.output_tokens} tokens, cost ${pc}`);
+    });
   }
   lines.push("", `## Final code`, "", "```" + hlLang(r.language||""), r.final_code || r.code, "```");
   return lines.join("\n");
@@ -627,8 +842,18 @@ function renderRagNote(sources){
 function applyResult(r){
   lastResult = r;
   codeLang = r.language || "";
-  draftCode = r.code; finalCode = r.final_code || r.code;
-  setFilesMode(r.files || []);
+  const files = (r.files || []).filter(f => (f.content || "").trim());
+  draftCode = r.code;
+  // Multi-file verdicts leave final_code empty by design (the corrections
+  // live in `files`): rebuild the final blob in files_to_blob format so the
+  // Diff tab compares the coder's draft against the LEAD's actual output
+  // instead of falling back to the draft itself.
+  finalCode = r.final_code || (files.length
+    ? files.map(f => "# ===== " + f.path + " =====\n" + (f.content || "")).join("\n\n")
+    : r.code);
+  // Ignore files with empty content (some Leads list paths without content):
+  // they would blank the Final tab - fall back to the blob instead.
+  setFilesMode(files);
   setCodeTab("final");
   renderPanel(r.reviews || []);
   if (r.consensus) renderConsensus(r.consensus);
@@ -636,6 +861,8 @@ function applyResult(r){
   if (r.verdict) renderVerdict(r.verdict, r.rationale);
   renderCost(r.cost_summary);
   renderUsageSteps(r.usages || []);
+  $("tabDiff").disabled = false;      // diff Draft -> Final now meaningful
+  $("leadRetryBtn").disabled = false; // a verdict exists to refresh
   $("copyBtn").disabled = false; $("dlBtn").disabled = false; $("reportBtn").disabled = false;
   $("messages").innerHTML = "";
   addMsg("lead", "Verdict: " + (r.verdict || "?") + "\n\n" + (r.rationale || "(no rationale)"));
@@ -655,11 +882,12 @@ async function regenFiles(){
     });
     if (!res.ok){ throw new Error("HTTP " + res.status + ": " + await res.text()); }
     const data = await res.json();
-    if (data.files && data.files.length){
-      setFilesMode(data.files);
+    const files = (data.files || []).filter(f => (f.content || "").trim());
+    if (files.length){
+      setFilesMode(files);
       setCodeTab("final");
-      addMsg("lead", "Updated the file tree: " + data.files.length + " file(s). Use the file selector and Archive button.");
-      $("status").textContent = "File tree updated (" + data.files.length + " files).";
+      addMsg("lead", "Updated the file tree: " + files.length + " file(s). Use the file selector and Archive button.");
+      $("status").textContent = "File tree updated (" + files.length + " files).";
     } else {
       $("status").textContent = "No file tree returned.";
     }
@@ -688,9 +916,10 @@ async function runConsensus(){
   $("panel").innerHTML = '<div class="empty">Coder writing...</div>';
   $("consensus").innerHTML = '<div class="empty">Waiting for the panel...</div>';
   renderVerdict(""); renderCost(null); renderUsageSteps([]);
-  const liveReviews = [];
+  liveReviews = [];
   let resultSeen = false;
   $("status").textContent = "Coder writing...";
+  resetProgress();
   try {
     const res = await fetch("/api/run/stream", {
       method: "POST", headers: {"Content-Type":"application/json"},
@@ -699,24 +928,32 @@ async function runConsensus(){
     if (!res.ok || !res.body){ throw new Error("HTTP " + res.status + ": " + (res.body ? await res.text() : "")); }
     await readSSE(res, (evt) => {
       if (evt.usage) renderCost(evt.usage);   // live cost from the first event on
+      if (evt.context) renderContext(evt.context);  // prompt size of the last step
       if (evt.type === "code"){
         codeLang = evt.language || "";
         draftCode = evt.code;
+        // The run itself is the source of truth for the reviewer count (the
+        // reactive low-quota panel can differ from the cached health probe).
+        if (evt.panel_size){ PANEL_SIZE = evt.panel_size; if (progressState) progressState.panel = PANEL_SIZE; }
         setCodeTab("draft");
         $("panel").innerHTML = '<div class="empty">Panel reviewing in parallel...</div>';
         $("status").textContent = "Panel reviewing...";
+        setProgress("panel");
       } else if (evt.type === "review"){
         liveReviews.push(evt.review);
         renderPanel(liveReviews);
         $("status").textContent = `Panel reviewing... (${liveReviews.length}/${PANEL_SIZE})`;
+        progressReviewDone();
       } else if (evt.type === "consensus"){
         renderConsensus(evt.consensus);
         $("status").textContent = "Lead deciding...";
+        setProgress("lead");
       } else if (evt.type === "result"){
         resultSeen = true;
         sessionId = evt.session_id;
         applyResult(evt.result);
         $("status").textContent = "Done. Talk to the Lead in the middle column.";
+        setProgress("done");
       } else if (evt.type === "error"){
         throw new Error(evt.error);
       }
@@ -726,12 +963,96 @@ async function runConsensus(){
     if (!resultSeen) throw new Error("Run did not complete (stream ended early). Click Run to retry.");
   } catch (e){
     $("status").textContent = "Error: " + friendlyError(e.message);
+    failProgress();
+    showRunRetry();
     if (/\b429\b|too many requests|rate.?limit/i.test(String(e.message))) markRateLimited();
   } finally {
     $("runBtn").disabled = false;
   }
 }
 $("runBtn").onclick = runConsensus;
+
+// Retry button shown in the status area after a stream error: re-runs the
+// whole pipeline with the same spec (simple retry when the coder failed).
+function showRunRetry(){
+  const b = document.createElement("button");
+  b.className = "act";
+  b.textContent = "Retry run";
+  b.onclick = () => runConsensus();
+  $("status").appendChild(document.createElement("br"));
+  $("status").appendChild(b);
+}
+
+// Re-run ONE reviewer (refresh or recovery), then the backend replays
+// consensus + lead with the updated panel. Events: review/consensus/result.
+async function retryReviewer(name){
+  if (!sessionId || retryingReviewer) return;
+  retryingReviewer = name;
+  renderPanel(liveReviews);
+  const prevStatus = $("status").textContent;
+  $("status").textContent = `Retrying reviewer ${name}...`;
+  try {
+    const res = await fetch("/api/run/retry/reviewer", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({session_id: sessionId, reviewer: name})
+    });
+    if (!res.ok || !res.body){ throw new Error("HTTP " + res.status + ": " + (res.body ? await res.text() : "")); }
+    await readSSE(res, (evt) => {
+      if (evt.type === "review"){
+        const i = liveReviews.findIndex(r => r.reviewer === evt.review.reviewer);
+        if (i >= 0) liveReviews[i] = evt.review; else liveReviews.push(evt.review);
+        renderPanel(liveReviews);
+        $("status").textContent = "Reviewer done. Re-running consensus and Lead...";
+      } else if (evt.type === "consensus"){
+        renderConsensus(evt.consensus);
+      } else if (evt.type === "result"){
+        applyResult(evt.result);
+        $("status").textContent = "Retry done: consensus and verdict updated.";
+      } else if (evt.type === "error"){
+        throw new Error(evt.error);
+      }
+    });
+  } catch (e){
+    $("status").textContent = "Retry failed: " + friendlyError(e.message);
+    if (/\b429\b|too many requests|rate.?limit/i.test(String(e.message))) markRateLimited();
+  } finally {
+    retryingReviewer = null;
+    renderPanel(liveReviews);
+    if ($("status").textContent.startsWith("Retrying reviewer")) $("status").textContent = prevStatus;
+  }
+}
+
+// Re-run the Lead against the same spec/code/consensus (refresh a verdict
+// you do not like, or recover a degraded/unreachable Lead).
+async function retryLead(){
+  if (!sessionId || retryingLead) return;
+  retryingLead = true;
+  const btn = $("leadRetryBtn");
+  btn.disabled = true; btn.textContent = "Retrying...";
+  $("status").textContent = "Re-running the Lead...";
+  try {
+    const res = await fetch("/api/run/retry/lead", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({session_id: sessionId})
+    });
+    if (!res.ok || !res.body){ throw new Error("HTTP " + res.status + ": " + (res.body ? await res.text() : "")); }
+    await readSSE(res, (evt) => {
+      if (evt.type === "result"){
+        applyResult(evt.result);
+        $("status").textContent = "Lead verdict updated.";
+      } else if (evt.type === "error"){
+        throw new Error(evt.error);
+      }
+    });
+  } catch (e){
+    $("status").textContent = "Lead retry failed: " + friendlyError(e.message);
+    if (/\b429\b|too many requests|rate.?limit/i.test(String(e.message))) markRateLimited();
+  } finally {
+    retryingLead = false;
+    btn.disabled = false; btn.textContent = "Retry lead";
+  }
+}
+$("leadRetryBtn").onclick = retryLead;
 
 async function sendChatNonStream(txt, pending){
   const res = await fetch("/api/chat", {
@@ -781,8 +1102,9 @@ async function sendChat(){
     if (usage){
       const cost = document.createElement("div");
       cost.className = "msg-cost";
+      const cached = usage.cached_tokens ? " · " + usage.cached_tokens + " cached" : "";
       cost.textContent = "cost: $" + ((usage.cost||0).toFixed(4))
-        + " (" + (usage.input_tokens||0) + " in / " + (usage.output_tokens||0) + " out)";
+        + " (" + (usage.input_tokens||0) + " in / " + (usage.output_tokens||0) + " out" + cached + ")";
       $("messages").appendChild(cost);
       $("messages").scrollTop = $("messages").scrollHeight;
     }

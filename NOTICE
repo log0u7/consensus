@@ -1,0 +1,12 @@
+consensus
+Copyright 2026 log0u7
+
+This product includes software developed as part of the consensus project
+(https://github.com/log0u7/consensus), licensed under the Apache License,
+Version 2.0.
+
+This product bundles Highlight.js (src/static/vendor/), licensed under the
+BSD 3-Clause License:
+
+    Copyright (c) 2006-2024 Josh Goebel and contributors.
+    https://github.com/highlightjs/highlight.js/blob/main/LICENSE

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- License switched from MIT to Apache 2.0; bundled Highlight.js attribution
+  moved to a `NOTICE` file.
+
 ## [0.4.0] - 2026-08-28
 
 ### Added

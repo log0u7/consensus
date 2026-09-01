@@ -1,0 +1,41 @@
+name: Team / manifest issue
+description: Problem with a team YAML manifest, skills, or topology
+labels: ["teams"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For design questions, see `docs/teams.md` and the examples in
+        `teams/` (`sre.yaml`, `pentest.yaml`). Redact API keys and secret
+        values before pasting manifests or logs.
+  - type: textarea
+    id: manifest
+    attributes:
+      label: Team manifest (YAML)
+      description: The relevant part of your `teams/<name>.yaml`.
+      render: yaml
+    validations:
+      required: true
+  - type: dropdown
+    id: topology
+    attributes:
+      label: Topology
+      options:
+        - consensus
+        - pipeline
+        - loop
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected vs observed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or error output
+      render: shell
+    validations:
+      required: false

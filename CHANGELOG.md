@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- GitHub issue forms (bug report, feature request, team manifest) with
+  required fields; blank issues disabled. Pull request template and a
+  `PR hygiene` CI job enforcing Conventional Commits titles and branch
+  naming.
+
 ### Changed
 
 - License switched from MIT to Apache 2.0; bundled Highlight.js attribution

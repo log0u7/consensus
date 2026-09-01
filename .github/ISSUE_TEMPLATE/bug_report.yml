@@ -1,0 +1,78 @@
+name: Bug report
+description: Report a problem with consensus
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report. Fields marked
+        required are enforced by GitHub: the form cannot be submitted empty.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: |
+        Minimal commands, spec, or YAML that reproduce the issue.
+        Redact API keys and secret values.
+      placeholder: |
+        1. Run `make run SPEC="..."`
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual behavior
+      description: What you expected to happen, and what actually happened.
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - api (FastAPI, SSE, web UI)
+        - core (pipeline, agents, topologies)
+        - providers / llm
+        - tui
+        - sandbox
+        - rag
+        - mcp tools
+        - other
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider involved
+      options:
+        - not provider-specific
+        - zen
+        - openai / OpenRouter
+        - anthropic
+        - local (Ollama / vLLM)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Output of `git log -1 --oneline`, or the release tag.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for duplicates
+          required: true
+        - label: I can reproduce this on the latest main branch
+          required: true

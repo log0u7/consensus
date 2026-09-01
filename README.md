@@ -6,7 +6,7 @@
 </p>
 
 [![CI](https://github.com/log0u7/consensus/actions/workflows/ci.yml/badge.svg)](https://github.com/log0u7/consensus/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![code style: ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![Checked with mypy](https://img.shields.io/badge/checked%20with-mypy-blue.svg)](https://mypy-lang.org/)
@@ -366,7 +366,7 @@ consensus/
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Apache 2.0, Copyright 2026 log0u7. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 This project bundles [Highlight.js](https://highlightjs.org/) under the
-BSD 3-Clause License.
+BSD 3-Clause License (attribution in [NOTICE](NOTICE)).

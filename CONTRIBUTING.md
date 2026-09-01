@@ -11,6 +11,7 @@ Git workflow, conventions, and project structure for contributors.
   - `fix/*` - a bug fix or hardening change.
   - `docs/*` - documentation only.
   - `ci/*` - CI/tooling changes.
+  - `chore/*` - maintenance (releases, licensing, deps).
 
 ## Workflow
 
@@ -48,6 +49,21 @@ fix(llm): harden JSON parsing against fenced code
 docs(readme): add SRE team quickstart
 ci(github): add Python 3.13 to test matrix
 ```
+
+## Issues and pull requests
+
+Issues must use one of the templates (bug report, feature request, team
+manifest); blank issues are disabled and incomplete forms are rejected by
+GitHub. Reports that do not meet the bar are closed as "not planned" with a
+short reason.
+
+Pull requests use the PR template checklist, and the `PR hygiene` CI job
+enforces the hard requirements:
+
+- PR title follows Conventional Commits (`type(scope): description`).
+- Source branch is named `feat/*`, `fix/*`, `docs/*`, `ci/*`, or `chore/*`.
+
+Required status checks on `main` block merging while any CI job fails.
 
 ## Secrets
 

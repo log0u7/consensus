@@ -13,11 +13,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   required fields; blank issues disabled. Pull request template and a
   `PR hygiene` CI job enforcing Conventional Commits titles and branch
   naming.
+- **Declarative layer wired**: production topologies now call
+  `context.build()`; `skills:` and `rag_ns:` declared in `teams/*.yaml`
+  reach the prompts (skills in the stable system prefix, role-level RAG
+  injected per role), closing the long-standing docs/teams.md "not
+  wired yet" gap. `fallback:` per role now overrides the env-driven
+  provider fallbacks; absent/empty keeps env defaults.
+- Vendored fonts: IBM Plex Sans and JetBrains Mono woff2 (official OFL
+  releases) served from `/vendor/fonts/`; the UI now renders with them
+  instead of falling back to system fonts.
+- sqlite-vec declared in requirements (documented `RAG_BACKEND=sqlite`
+  crashed on import before); offline integration test for the sqlite-vec
+  backend and a PostgresStore integration test (skipped without
+  `PG_DSN`) - both alternative backends are now proven to work.
 
 ### Changed
 
 - License switched from MIT to Apache 2.0; bundled Highlight.js attribution
   moved to a `NOTICE` file.
+- Over-engineering pass (net ~-350 lines): unreachable ImportError
+  fallbacks dropped from `governor.py` (deps are exact-pinned), 8
+  copy-pasted governor blocks collapsed into `_governed`/`_governed_json`
+  helpers, `llm.py` retry logic shared between POST and SSE paths,
+  single-turn transport wrappers folded into `llm.complete()`, single
+  `SandboxResult` shared by sandbox and pipeline schemas, shared pydantic
+  validators, UI reuses `readSSE`/`downloadBlob`, Makefile `test-docker`
+  and `dev` targets removed (duplicated CI / `DEV=1`), unused
+  `pydantic-settings` dependency removed.
+- `pipeline/loop` role model refs and panel member model refs resolve
+  through `providers.resolve_name` (single provider-resolution path).
 
 ## [0.4.0] - 2026-08-28
 

@@ -28,7 +28,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 
-from .models import Artifact
+from .models import Artifact, SandboxResult
 
 log = logging.getLogger(__name__)
 
@@ -67,34 +67,6 @@ class SandboxLimits:
     timeout: int = DEFAULT_TIMEOUT
     mem_limit: str = DEFAULT_MEM_LIMIT
     cpu_quota: int = DEFAULT_CPU_QUOTA
-
-
-@dataclass
-class SandboxResult:
-    stdout: str = ""
-    stderr: str = ""
-    exit_code: int = 0
-    timed_out: bool = False
-    skipped: bool = False  # True when SANDBOX_ENGINE=none
-    engine: str = ""
-
-    @property
-    def success(self) -> bool:
-        return self.exit_code == 0 and not self.timed_out and not self.skipped
-
-    def as_context(self) -> str:
-        """Format the execution result for injection into a reviewer prompt."""
-        if self.skipped:
-            return "(sandbox disabled - code was not executed)"
-        status = "SUCCESS" if self.success else f"FAILED (exit {self.exit_code})"
-        if self.timed_out:
-            status = "TIMED OUT"
-        parts = [f"=== Execution result: {status} ==="]
-        if self.stdout.strip():
-            parts.append(f"stdout:\n{self.stdout[:2000]}")
-        if self.stderr.strip():
-            parts.append(f"stderr:\n{self.stderr[:1000]}")
-        return "\n".join(parts)
 
 
 class Sandbox(ABC):

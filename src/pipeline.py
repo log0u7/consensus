@@ -16,7 +16,6 @@ from collections.abc import AsyncIterator
 
 from . import agents, config
 from .models import CostSummary, PipelineResult
-from .models import summarize_usage as summarize_usage  # re-exported (api.py)
 
 log = logging.getLogger(__name__)
 

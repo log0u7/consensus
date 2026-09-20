@@ -110,11 +110,6 @@ index: _env ## Index docs-projet into the RAG store
 run: _env ## Run the pipeline on the CLI: make run SPEC="..."
 	$(DC) run --rm app python -m src.pipeline "$(SPEC)"
 
-# bare-metal uvicorn (no Docker), hot-reload, .env loaded
-.PHONY: dev
-dev: dev-setup ## Run uvicorn bare-metal on http://127.0.0.1:8800 with hot-reload
-	ZEN_API_KEY=dummy $(PY) -m uvicorn src.api:app --host 127.0.0.1 --port 8800 --reload
-
 .PHONY: config
 config: _env ## Show the merged compose configuration
 	$(DC) config
@@ -181,10 +176,3 @@ clean: ## Remove local build/test artifacts (keeps .env; .env.active is regenera
 	rm -rf .coverage coverage.xml htmlcov .pytest_cache .mypy_cache .ruff_cache
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
 	rm -f rag.db pricing.db cache.db .env.active
-
-.PHONY: test-docker
-test-docker: ## Run lint+typecheck+test inside a container (iso CI env)
-	docker build -t consensus-ci -f Dockerfile .
-	docker run --rm -e ZEN_API_KEY=dummy \
-	  -v "$(CURDIR)":/app -w /app consensus-ci \
-	  sh -c "pip install -q -r requirements-dev.txt && ruff check src tests tui && mypy src tui && pytest"

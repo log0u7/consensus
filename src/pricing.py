@@ -47,8 +47,6 @@ PRICING_TTL_HOURS = float(os.environ.get("PRICING_TTL_HOURS", "24"))
 PRICING_TIMEOUT = float(os.environ.get("PRICING_TIMEOUT", "15"))
 PRICING_REFRESH = os.environ.get("PRICING_REFRESH", "1").strip() not in ("0", "false", "no")
 
-_FREE_VALUE_IGNORED = ("", None, "-1")
-
 
 def _num(raw: object) -> float | None:
     """Parse an OpenRouter pricing field (string) into USD/token, or None."""

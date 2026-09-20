@@ -10,7 +10,7 @@ Tests cover:
 """
 
 import pytest
-from src import agents, pipeline
+from src import agents, models, pipeline
 from src.models import ConsensusReport, CostSummary, PipelineResult, Usage  # noqa: F401 (all used)
 
 # ---------------------------------------------------------------------------
@@ -152,7 +152,7 @@ async def test_run_result_has_consensus(monkeypatch):
 
 
 def test_summarize_usage_empty():
-    cs = pipeline.summarize_usage([])
+    cs = models.summarize_usage([])
     assert cs.calls == 0
     assert cs.input_tokens == 0
     assert cs.output_tokens == 0
@@ -166,7 +166,7 @@ def test_summarize_usage_aggregates_tokens():
         Usage(input_tokens=200, output_tokens=80, cost=0.002),
         Usage(input_tokens=50, output_tokens=20),  # no cost
     ]
-    cs = pipeline.summarize_usage(usages)
+    cs = models.summarize_usage(usages)
     assert cs.calls == 3
     assert cs.input_tokens == 350
     assert cs.output_tokens == 150
@@ -179,7 +179,7 @@ def test_summarize_usage_no_cost_known():
         Usage(input_tokens=100, output_tokens=50),
         Usage(input_tokens=200, output_tokens=80),
     ]
-    cs = pipeline.summarize_usage(usages)
+    cs = models.summarize_usage(usages)
     assert cs.cost_known is False
     assert cs.cost == 0.0
 

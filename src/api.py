@@ -20,8 +20,8 @@ from fastapi.responses import Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import archive, config, llm, pipeline, quota
-from .models import Artifact, CostSummary, PipelineResult
+from . import agents, archive, config, llm, pipeline, quota
+from .models import Artifact, CostSummary, PipelineResult, summarize_usage
 from .sessions import store
 
 config.setup_logging()
@@ -220,9 +220,6 @@ async def api_retry_reviewer(req: RetryReviewerRequest):
     if member is None:
         raise HTTPException(status_code=404, detail="reviewer not found in this session")
 
-    from . import agents
-    from .models import summarize_usage
-
     async def gen():
         try:
             async with _run_slot():
@@ -272,9 +269,6 @@ async def api_retry_lead(req: RetryLeadRequest):
         raise HTTPException(status_code=404, detail="session expired or unknown")
     result: PipelineResult = sess["result"]
 
-    from . import agents
-    from .models import summarize_usage
-
     async def gen():
         try:
             async with _run_slot():
@@ -308,8 +302,6 @@ async def api_chat(req: ChatRequest):
     if sess is None:
         raise HTTPException(status_code=404, detail="session expired or unknown")
     sess["history"].append({"role": "user", "content": req.message})
-    from . import agents
-
     tok = llm.set_step("chat")
     try:
         with llm.usage_scope() as usages:
@@ -321,7 +313,7 @@ async def api_chat(req: ChatRequest):
         llm.reset_step(tok)
     sess["history"].append({"role": "assistant", "content": reply})
     store.save(req.session_id, sess)
-    return ChatResponse(reply=reply, usage=pipeline.summarize_usage(usages))
+    return ChatResponse(reply=reply, usage=summarize_usage(usages))
 
 
 @app.post("/api/chat/stream")
@@ -336,7 +328,6 @@ async def api_chat_stream(req: ChatRequest):
     if sess is None:
         raise HTTPException(status_code=404, detail="session expired or unknown")
     sess["history"].append({"role": "user", "content": req.message})
-    from . import agents
 
     async def gen():
         parts: list[str] = []
@@ -351,7 +342,7 @@ async def api_chat_stream(req: ChatRequest):
             sess["history"].append({"role": "assistant", "content": reply})
             reply_appended = True
             store.save(req.session_id, sess)
-            usage = pipeline.summarize_usage(usages).model_dump()
+            usage = summarize_usage(usages).model_dump()
             yield f"data: {json.dumps({'done': True, 'usage': usage})}\n\n"
         except asyncio.CancelledError:
             # Client went away: propagate after the finally block has cleaned up.
@@ -379,14 +370,13 @@ async def api_regen_artifacts(req: RegenRequest):
     sess = store.get(req.session_id)
     if sess is None:
         raise HTTPException(status_code=404, detail="session expired or unknown")
-    from . import agents
 
     with llm.usage_scope() as usages:
         files = await agents.lead_regen_artifacts(sess["system"], sess["history"])
     if files:
         sess["result"].files = files
         store.save(req.session_id, sess)
-    return RegenResponse(files=files, usage=pipeline.summarize_usage(usages))
+    return RegenResponse(files=files, usage=summarize_usage(usages))
 
 
 @app.post("/api/archive")
@@ -436,10 +426,8 @@ async def api_quota_set(req: QuotaRequest):
 async def health(check_provider: str | None = None):
     out = {"status": "ok", "sessions": len(store), "panel_size": len(quota.panel())}
     if check_provider == "all":
-        import asyncio as _asyncio
-
         names = list(config.PROVIDERS)
-        probes = await _asyncio.gather(
+        probes = await asyncio.gather(
             *(llm.provider_reachable(name) for name in names),
             return_exceptions=True,
         )

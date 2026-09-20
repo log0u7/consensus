@@ -190,16 +190,7 @@ async def run_consensus(
             str(summary.cost) if summary.cost_known else "unknown",
         )
 
-        exec_model: SandboxResult | None = None
-        if exec_result is not None:
-            exec_model = SandboxResult(
-                stdout=exec_result.stdout,
-                stderr=exec_result.stderr,
-                exit_code=exec_result.exit_code,
-                timed_out=exec_result.timed_out,
-                skipped=exec_result.skipped,
-                engine=exec_result.engine,
-            )
+        exec_model: SandboxResult | None = exec_result
 
         yield {
             "type": "result",

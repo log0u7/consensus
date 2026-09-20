@@ -1,9 +1,9 @@
 """Pydantic schemas shared across the pipeline."""
 
 import posixpath
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, BeforeValidator, field_validator
 
 Severity = Literal["critical", "high", "medium", "low"]
 Category = Literal["security", "correctness", "performance", "style", "maintainability"]
@@ -18,6 +18,18 @@ def _normalize(value: str, allowed: tuple[str, ...], default: str) -> str:
     """
     v = (value or "").strip().lower()
     return v if v in allowed else default
+
+
+def _norm_severity(v: str) -> str:
+    return _normalize(v, _SEVERITIES, "medium")
+
+
+def _norm_category(v: str) -> str:
+    return _normalize(v, _CATEGORIES, "correctness")
+
+
+NormalizedSeverity = Annotated[Severity, BeforeValidator(_norm_severity)]
+NormalizedCategory = Annotated[Category, BeforeValidator(_norm_category)]
 
 
 def sanitize_path(raw: str) -> str:
@@ -109,20 +121,10 @@ def summarize_usage(usages: list[Usage]) -> CostSummary:
 
 class Issue(BaseModel):
     title: str
-    severity: Severity = "medium"
-    category: Category = "correctness"
+    severity: NormalizedSeverity = "medium"
+    category: NormalizedCategory = "correctness"
     location: str = ""
     description: str = ""
-
-    @field_validator("severity", mode="before")
-    @classmethod
-    def _norm_severity(cls, v: str) -> str:
-        return _normalize(v, _SEVERITIES, "medium")
-
-    @field_validator("category", mode="before")
-    @classmethod
-    def _norm_category(cls, v: str) -> str:
-        return _normalize(v, _CATEGORIES, "correctness")
 
 
 class Review(BaseModel):
@@ -135,21 +137,11 @@ class Review(BaseModel):
 
 class ConsensusIssue(BaseModel):
     title: str
-    severity: Severity = "medium"
-    category: Category = "correctness"
+    severity: NormalizedSeverity = "medium"
+    category: NormalizedCategory = "correctness"
     description: str = ""
     flagged_by: list[str] = []
     consensus_score: float = 0.0  # flagged_by / panel size
-
-    @field_validator("severity", mode="before")
-    @classmethod
-    def _norm_severity(cls, v: str) -> str:
-        return _normalize(v, _SEVERITIES, "medium")
-
-    @field_validator("category", mode="before")
-    @classmethod
-    def _norm_category(cls, v: str) -> str:
-        return _normalize(v, _CATEGORIES, "correctness")
 
 
 class ConsensusReport(BaseModel):
@@ -174,18 +166,36 @@ class Artifact(BaseModel):
 
 
 class SandboxResult(BaseModel):
-    """Execution result from the sandbox (optional, populated when sandbox=true)."""
+    """Execution result from the sandbox (optional, populated when sandbox=true).
+
+    Single class shared by the sandbox engines (sandbox.py) and the pipeline
+    schemas: one representation, no field-copy bridge.
+    """
 
     stdout: str = ""
     stderr: str = ""
     exit_code: int = 0
     timed_out: bool = False
-    skipped: bool = False
+    skipped: bool = False  # True when SANDBOX_ENGINE=none
     engine: str = ""
 
     @property
     def success(self) -> bool:
         return self.exit_code == 0 and not self.timed_out and not self.skipped
+
+    def as_context(self) -> str:
+        """Format the execution result for injection into a reviewer prompt."""
+        if self.skipped:
+            return "(sandbox disabled - code was not executed)"
+        status = "SUCCESS" if self.success else f"FAILED (exit {self.exit_code})"
+        if self.timed_out:
+            status = "TIMED OUT"
+        parts = [f"=== Execution result: {status} ==="]
+        if self.stdout.strip():
+            parts.append(f"stdout:\n{self.stdout[:2000]}")
+        if self.stderr.strip():
+            parts.append(f"stderr:\n{self.stderr[:1000]}")
+        return "\n".join(parts)
 
 
 class PipelineResult(BaseModel):

@@ -85,16 +85,22 @@ def _backoff_delay(attempt: int, retry_after: float | None) -> float:
     return min(base, config.RATE_LIMIT_MAX_DELAY) * (0.5 + random.random() / 2)
 
 
+def _retry_delay(status: int, attempt: int, retry_after: float | None) -> float | None:
+    """Sleep seconds when the response is retryable and attempts remain, else None."""
+    if status not in config.RATE_LIMIT_RETRY_STATUSES or attempt >= config.RATE_LIMIT_MAX_RETRIES:
+        return None
+    return _backoff_delay(attempt, retry_after)
+
+
 async def _post_with_retry(client: httpx.AsyncClient, path: str, **kwargs) -> httpx.Response:
     """POST with retry on rate-limit/transient statuses."""
     attempt = 0
     while True:
         r = await client.post(path, **kwargs)
-        if (
-            r.status_code in config.RATE_LIMIT_RETRY_STATUSES
-            and attempt < config.RATE_LIMIT_MAX_RETRIES
-        ):
-            delay = _backoff_delay(attempt, _parse_retry_after(r.headers.get("Retry-After")))
+        delay = _retry_delay(
+            r.status_code, attempt, _parse_retry_after(r.headers.get("Retry-After"))
+        )
+        if delay is not None:
             log.warning(
                 "provider %s on %s; retry in %.1fs (attempt %d/%d)",
                 r.status_code,
@@ -249,28 +255,13 @@ async def provider_reachable(provider_name: str, timeout: float = 5.0) -> dict:
 # ---------------------------------------------------------------------------
 
 
-async def call_openai_compatible(
-    provider_name: str,
-    model: str,
-    user: str,
-    system: str | None = None,
-    max_tokens: int = 4096,
-) -> str:
-    """Single-turn completion via POST /chat/completions."""
-    messages: list[dict[str, str]] = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": user})
-    return await call_openai_compatible_history(provider_name, model, messages, max_tokens)
-
-
 async def call_openai_compatible_history(
     provider_name: str,
     model: str,
     messages: list[dict[str, str]],
     max_tokens: int = 4096,
 ) -> str:
-    """Multi-turn completion via POST /chat/completions (full message history)."""
+    """Completion via POST /chat/completions (full message history)."""
     from . import cache as cache_mod
 
     cached = cache_mod.get(messages, model)
@@ -309,25 +300,13 @@ async def call_openai_compatible_history(
 # ---------------------------------------------------------------------------
 
 
-async def call_anthropic(
-    model: str,
-    user: str,
-    system: str | None = None,
-    max_tokens: int = 4096,
-) -> str:
-    """Single-turn completion via Anthropic Messages API."""
-    return await _call_anthropic_messages(
-        model, [{"role": "user", "content": user}], system, max_tokens
-    )
-
-
 async def call_anthropic_history(
     model: str,
     messages: list[dict[str, str]],
     system: str | None = None,
     max_tokens: int = 4096,
 ) -> str:
-    """Multi-turn completion via Anthropic Messages API."""
+    """Completion via Anthropic Messages API."""
     return await _call_anthropic_messages(model, messages, system, max_tokens)
 
 
@@ -392,13 +371,10 @@ async def call_anthropic_history_stream(
         attempt = 0
         while True:
             async with c.stream("POST", "/messages", json=payload) as r:
-                if (
-                    r.status_code in config.RATE_LIMIT_RETRY_STATUSES
-                    and attempt < config.RATE_LIMIT_MAX_RETRIES
-                ):
-                    delay = _backoff_delay(
-                        attempt, _parse_retry_after(r.headers.get("Retry-After"))
-                    )
+                delay = _retry_delay(
+                    r.status_code, attempt, _parse_retry_after(r.headers.get("Retry-After"))
+                )
+                if delay is not None:
                     log.warning(
                         "provider %s on stream; retry in %.1fs (attempt %d/%d)",
                         r.status_code,
@@ -464,9 +440,15 @@ async def complete(
     """Route a single-turn completion to the right transport."""
     provider = config.get_provider(provider_name)
     if provider.transport == "openai-compatible":
-        return await call_openai_compatible(provider_name, model, user, system, max_tokens)
+        messages: list[dict[str, str]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": user})
+        return await call_openai_compatible_history(provider_name, model, messages, max_tokens)
     if provider.transport == "anthropic":
-        return await call_anthropic(model, user, system, max_tokens)
+        return await _call_anthropic_messages(
+            model, [{"role": "user", "content": user}], system, max_tokens
+        )
     raise ValueError(f"unknown transport for provider {provider_name!r}: {provider.transport}")
 
 

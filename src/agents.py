@@ -6,7 +6,7 @@ recovers it with repair and retry.
 """
 
 import logging
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 
 from pydantic import ValidationError
 
@@ -69,15 +69,46 @@ async def governed_call(
     Single source of truth for topology role steps; agents must never call
     llm.complete() directly.
     """
+    return await _governed(
+        provider,
+        lambda prov: llm.complete(prov, model, user, system=system, max_tokens=max_tokens),
+        fallback,
+    )
 
-    def _make(prov: str) -> Awaitable[str]:
-        return llm.complete(prov, model, user, system=system, max_tokens=max_tokens)
 
+async def _governed(
+    provider: str,
+    make_call: Callable[[str], Awaitable[str]],
+    fallback: list[str] | None = None,
+) -> str:
+    """governor.call for one provider with provider fallback."""
     return await governor.call(
         provider,
-        lambda: _make(provider),
+        lambda: make_call(provider),
         fallback=fallback,
-        fallback_factory=lambda p: lambda: _make(p),
+        fallback_factory=lambda p: lambda: make_call(p),
+    )
+
+
+async def _governed_json(
+    provider: str,
+    make_call: Callable[[str, int], Awaitable[str]],
+    fallback: list[str] | None = None,
+) -> dict:
+    """complete_json_obj under the governor: rate-limit + retry + provider
+    fallback. make_call(prov, attempt) builds the call; attempt >= 1 is a
+    JSON-repair retry (callers append the retry hint)."""
+
+    def _make(prov: str, attempt: int) -> Awaitable[str]:
+        return make_call(prov, attempt)
+
+    return await llm.complete_json_obj(
+        lambda attempt: governor.call(
+            provider,
+            lambda: _make(provider, attempt),
+            fallback=fallback,
+            fallback_factory=lambda p: lambda: _make(p, attempt),
+        )
     )
 
 
@@ -111,23 +142,16 @@ async def write_code(
         provider, model = quota.coder_model()
     tok = llm.set_step("coder")
     try:
-
-        def _make(prov: str, attempt: int) -> Awaitable[str]:
-            return llm.complete(
+        data = await _governed_json(
+            provider,
+            lambda prov, attempt: llm.complete(
                 prov,
                 model,
                 user + (llm._JSON_RETRY_HINT if attempt else ""),
                 _CODER_SYS,
                 max_tokens=config.CODER_MAX_TOKENS,
-            )
-
-        data = await llm.complete_json_obj(
-            lambda attempt: governor.call(
-                provider,
-                lambda: _make(provider, attempt),
-                fallback=config.CODER_FALLBACK,
-                fallback_factory=lambda p: lambda: _make(p, attempt),
-            )
+            ),
+            config.CODER_FALLBACK,
         )
     finally:
         llm.reset_step(tok)
@@ -189,23 +213,16 @@ async def review_code(panel_member: dict, code: str) -> Review:
     user = _review_user(code)
     tok = llm.set_step(f"reviewer:{name}")
     try:
-
-        def _make(prov: str, attempt: int) -> Awaitable[str]:
-            return llm.complete(
+        data = await _governed_json(
+            provider,
+            lambda prov, attempt: llm.complete(
                 prov,
                 model,
                 user + (llm._JSON_RETRY_HINT if attempt else ""),
                 _REVIEW_SYS,
                 max_tokens=max_tokens,
-            )
-
-        data = await llm.complete_json_obj(
-            lambda attempt: governor.call(
-                provider,
-                lambda: _make(provider, attempt),
-                fallback=config.REVIEWER_FALLBACK,
-                fallback_factory=lambda p: lambda: _make(p, attempt),
-            )
+            ),
+            config.REVIEWER_FALLBACK,
         )
         issues = []
         for i in data.get("issues", []):
@@ -268,23 +285,16 @@ async def build_consensus(reviews: list[Review]) -> ConsensusReport:
     provider, model = quota.consensus_model()
     tok = llm.set_step("consensus")
     try:
-
-        def _make(prov: str, attempt: int) -> Awaitable[str]:
-            return llm.complete(
+        data = await _governed_json(
+            provider,
+            lambda prov, attempt: llm.complete(
                 prov,
                 model,
                 f"Reviews:\n\n{blob}" + (llm._JSON_RETRY_HINT if attempt else ""),
                 _CONSENSUS_SYS,
                 max_tokens=config.CONSENSUS_MAX_TOKENS,
-            )
-
-        data = await llm.complete_json_obj(
-            lambda attempt: governor.call(
-                provider,
-                lambda: _make(provider, attempt),
-                fallback=config.CONSENSUS_FALLBACK,
-                fallback_factory=lambda p: lambda: _make(p, attempt),
-            )
+            ),
+            config.CONSENSUS_FALLBACK,
         )
     except Exception as exc:
         # Provider failure (429 bursts exhausted, network, ...): the run must
@@ -404,23 +414,16 @@ async def lead_verdict(spec: str, code: str, consensus_json: str) -> dict:
         return min(config.LEAD_MAX_TOKENS * (attempt + 1), 64000)
 
     try:
-
-        def _make(prov: str, attempt: int) -> Awaitable[str]:
-            return llm.complete(
+        data = await _governed_json(
+            provider,
+            lambda prov, attempt: llm.complete(
                 prov,
                 model,
                 _LEAD_VERDICT_INSTR + (llm._JSON_RETRY_HINT if attempt else ""),
                 system,
                 max_tokens=_budget(attempt),
-            )
-
-        data = await llm.complete_json_obj(
-            lambda attempt: governor.call(
-                provider,
-                lambda: _make(provider, attempt),
-                fallback=config.LEAD_FALLBACK,
-                fallback_factory=lambda p: lambda: _make(p, attempt),
-            )
+            ),
+            config.LEAD_FALLBACK,
         )
     except ValueError as exc:
         log.warning("lead verdict unparseable, returning degraded verdict: %s", exc)
@@ -456,19 +459,25 @@ async def lead_regen_artifacts(system: str, history: list[dict[str, str]]) -> li
     provider, model = quota.lead_model()
     tok = llm.set_step("chat")
     try:
-
-        def _make(prov: str, attempt: int) -> Awaitable[str]:
-            instr = _LEAD_REGEN_INSTR + (llm._JSON_RETRY_HINT if attempt else "")
-            messages = _with_system(system, list(history) + [{"role": "user", "content": instr}])
-            return llm.complete_history(prov, model, messages, config.LEAD_MAX_TOKENS)
-
-        data = await llm.complete_json_obj(
-            lambda attempt: governor.call(
-                provider,
-                lambda: _make(provider, attempt),
-                fallback=config.LEAD_FALLBACK,
-                fallback_factory=lambda p: lambda: _make(p, attempt),
-            )
+        data = await _governed_json(
+            provider,
+            lambda prov, attempt: llm.complete_history(
+                prov,
+                model,
+                _with_system(
+                    system,
+                    list(history)
+                    + [
+                        {
+                            "role": "user",
+                            "content": _LEAD_REGEN_INSTR
+                            + (llm._JSON_RETRY_HINT if attempt else ""),
+                        }
+                    ],
+                ),
+                config.LEAD_MAX_TOKENS,
+            ),
+            config.LEAD_FALLBACK,
         )
     finally:
         llm.reset_step(tok)
@@ -482,9 +491,9 @@ async def lead_chat(system: str, history: list[dict[str, str]]) -> str:
     falls back to the Lead model when CHAT_MODEL is unset."""
     provider, model = quota.chat_model()
 
+    # Anthropic transport takes system as a top-level parameter;
+    # openai-compatible transports embed it as the first message.
     def _make(prov: str) -> Awaitable[str]:
-        # Anthropic transport takes system as a top-level parameter;
-        # openai-compatible transports embed it as the first message.
         if prov == "anthropic":
             return llm.call_anthropic_history(
                 model, history, system=system, max_tokens=config.CHAT_MAX_TOKENS
@@ -493,12 +502,7 @@ async def lead_chat(system: str, history: list[dict[str, str]]) -> str:
             prov, model, _with_system(system, history), config.CHAT_MAX_TOKENS
         )
 
-    return await governor.call(
-        provider,
-        lambda: _make(provider),
-        fallback=config.LEAD_FALLBACK,
-        fallback_factory=lambda p: lambda: _make(p),
-    )
+    return await _governed(provider, _make, config.LEAD_FALLBACK)
 
 
 def lead_chat_stream(system: str, history: list[dict[str, str]]):
@@ -526,12 +530,7 @@ def lead_chat_stream(system: str, history: list[dict[str, str]]):
         return llm.complete_history(prov, model, messages, config.CHAT_MAX_TOKENS)
 
     async def _wrap():
-        result = await governor.call(
-            provider,
-            lambda: _make(provider),
-            fallback=config.LEAD_FALLBACK,
-            fallback_factory=lambda p: lambda: _make(p),
-        )
+        result = await _governed(provider, _make, config.LEAD_FALLBACK)
         yield result
 
     return _wrap()

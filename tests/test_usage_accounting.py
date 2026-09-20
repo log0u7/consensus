@@ -128,8 +128,8 @@ async def test_anthropic_system_uses_cache_control(monkeypatch):
         lambda p: httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url=p.base_url),
     )
 
-    result = await llm.call_anthropic(
-        "claude-sonnet-4", "hi", system="You are stable.", max_tokens=8
+    result = await llm.complete(
+        "anthropic", "claude-sonnet-4", "hi", system="You are stable.", max_tokens=8
     )
     assert result == "ok"
 
@@ -143,7 +143,7 @@ async def test_anthropic_system_uses_cache_control(monkeypatch):
     # usage recorded through the mock: verify via a fresh scoped call
     async def scoped():
         with llm.usage_scope() as sink2:
-            await llm.call_anthropic("claude-sonnet-4", "hi", system="s", max_tokens=8)
+            await llm.complete("anthropic", "claude-sonnet-4", "hi", system="s", max_tokens=8)
         return sink2
 
     sink = await scoped()

@@ -143,7 +143,7 @@ def _build_providers() -> dict[str, Provider]:
             transport="anthropic",
             auth_header=hdr,
             auth_value=val,
-            extra_headers={"anthropic-version": "2023-06-01"},
+            extra_headers={"anthropic-version": ANTHROPIC_VERSION},
         )
 
     # --- Local (llama.cpp / Ollama / vLLM, OpenAI-compatible) ---------------
@@ -195,6 +195,8 @@ def get_provider(name: str) -> Provider:
 
 HTTP_TIMEOUT = float(os.environ.get("HTTP_TIMEOUT", "300"))
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+
+# Anthropic Messages API version header (single source; see _build_providers).
 ANTHROPIC_VERSION = "2023-06-01"
 
 
@@ -300,8 +302,6 @@ LOW_QUOTA_PANEL_SIZE = int(os.environ.get("LOW_QUOTA_PANEL_SIZE", "2"))
 # so the field separator is ":" which never appears in provider or model names
 # when using the "provider/model" convention).
 # ---------------------------------------------------------------------------
-
-_VALID_TRANSPORTS = set(("zen", "openai", "openrouter", "anthropic", "local"))
 
 # Default panel: the only universally free Zen coding model today.
 # NOTE: a single-model panel gives trivial consensus - run `make setup` to

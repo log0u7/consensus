@@ -110,10 +110,7 @@ def load(team_name: str) -> Team:
 
     path = _TEAMS_DIR / f"{team_name}.yaml"
     if not path.exists():
-        raise FileNotFoundError(
-            f"Team manifest not found: {path}. "
-            f"Available: {[p.stem for p in _TEAMS_DIR.glob('*.yaml')]}"
-        )
+        raise FileNotFoundError(f"Team manifest not found: {path}. Available: {list_teams()}")
     with path.open() as f:
         raw = yaml.safe_load(f)
 

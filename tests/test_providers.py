@@ -46,7 +46,7 @@ async def test_call_openai_compatible_parses_response(monkeypatch):
             transport=httpx.MockTransport(handler), base_url="http://mock-zen"
         ),
     )
-    result = await llm.call_openai_compatible("zen", "some-model", "hi")
+    result = await llm.complete("zen", "some-model", "hi")
     assert result == "hello world"
 
 

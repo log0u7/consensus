@@ -8,11 +8,9 @@ from src import governor, quota
 @pytest.fixture(autouse=True)
 def clear_limiters():
     """Reset aiolimiter cache between tests to avoid cross-loop reuse."""
-    if governor._HAS_LIMITER:
-        governor._LIMITERS.clear()
+    governor._LIMITERS.clear()
     yield
-    if governor._HAS_LIMITER:
-        governor._LIMITERS.clear()
+    governor._LIMITERS.clear()
 
 
 @pytest.fixture(autouse=True)

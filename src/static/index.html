@@ -727,10 +727,7 @@ async function downloadArchive(){
     });
     if (!res.ok){ throw new Error("HTTP " + res.status + ": " + await res.text()); }
     const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = "project." + (fmt);
-    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    downloadBlob("project." + (fmt), blob);
   } catch (e){
     $("status").textContent = "Archive error: " + e.message;
   } finally {
@@ -739,13 +736,16 @@ async function downloadArchive(){
 }
 $("archiveBtn").onclick = downloadArchive;
 
-function download(filename, text, type){
-  const blob = new Blob([text], { type: type || "text/plain" });
+function downloadBlob(filename, blob){
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url; a.download = filename;
   document.body.appendChild(a); a.click();
   document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
+function download(filename, text, type){
+  downloadBlob(filename, new Blob([text], { type: type || "text/plain" }));
 }
 
 const EXT = { python:"py", javascript:"js", typescript:"ts", go:"go", rust:"rs", java:"java", cpp:"cpp", csharp:"cs", bash:"sh", yaml:"yaml", json:"json", html:"html", sql:"sql", ruby:"rb", php:"php" };
@@ -1077,26 +1077,13 @@ async function sendChat(){
       body: JSON.stringify({session_id: sessionId, message: txt})
     });
     if (!res.ok || !res.body){ throw new Error("HTTP " + res.status); }
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = "", acc = "", streamErr = null, usage = null;
+    let acc = "", streamErr = null, usage = null;
     pending.textContent = "";
-    while (true){
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      // SSE events are separated by a blank line.
-      let idx;
-      while ((idx = buf.indexOf("\n\n")) !== -1){
-        const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
-        const line = chunk.split("\n").find(l => l.startsWith("data:"));
-        if (!line) continue;
-        let evt; try { evt = JSON.parse(line.slice(5).trim()); } catch (_){ continue; }
-        if (evt.delta){ acc += evt.delta; pending.textContent = acc; $("messages").scrollTop = $("messages").scrollHeight; }
-        else if (evt.error){ streamErr = evt.error; }
-        else if (evt.done){ usage = evt.usage || null; }
-      }
-    }
+    await readSSE(res, (evt) => {
+      if (evt.delta){ acc += evt.delta; pending.textContent = acc; $("messages").scrollTop = $("messages").scrollHeight; }
+      else if (evt.error){ streamErr = evt.error; }
+      else if (evt.done){ usage = evt.usage || null; }
+    });
     if (streamErr) throw new Error(streamErr);
     if (!acc) pending.textContent = "(no response)";
     if (usage){

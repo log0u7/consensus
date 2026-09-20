@@ -19,6 +19,13 @@ from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 
 import httpx
+from aiolimiter import AsyncLimiter
+from tenacity import (
+    AsyncRetrying,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential_jitter,
+)
 
 from . import config
 
@@ -28,40 +35,15 @@ log = logging.getLogger(__name__)
 # Rate limiters: one AsyncLimiter per provider, created lazily.
 # ---------------------------------------------------------------------------
 
-try:
-    from aiolimiter import AsyncLimiter
-
-    _LIMITERS: dict[str, AsyncLimiter] = {}
-
-    def _limiter(provider_name: str) -> AsyncLimiter:
-        if provider_name not in _LIMITERS:
-            rpm = config.provider_rpm(provider_name)
-            # 0 means unlimited: use a very high cap
-            _LIMITERS[provider_name] = AsyncLimiter(max(rpm, 10000), 60)
-        return _LIMITERS[provider_name]
-
-    _HAS_LIMITER = True
-except ImportError:
-    log.warning("aiolimiter not installed; rate limiting disabled")
-    _HAS_LIMITER = False
-
-    async def _noop_acquire():  # type: ignore[misc]
-        pass
-
-    class _FakeLimiter:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_):
-            pass
-
-    def _limiter(provider_name: str) -> "_FakeLimiter":  # type: ignore[misc]
-        return _FakeLimiter()
+_LIMITERS: dict[str, AsyncLimiter] = {}
 
 
-# ---------------------------------------------------------------------------
-# Retry predicate + tenacity setup
-# ---------------------------------------------------------------------------
+def _limiter(provider_name: str) -> AsyncLimiter:
+    if provider_name not in _LIMITERS:
+        rpm_cap = config.provider_rpm(provider_name)
+        # 0 means unlimited: use a very high cap
+        _LIMITERS[provider_name] = AsyncLimiter(max(rpm_cap, 10000), 60)
+    return _LIMITERS[provider_name]
 
 
 def _is_retryable(exc: BaseException) -> bool:
@@ -70,20 +52,6 @@ def _is_retryable(exc: BaseException) -> bool:
     # Retrying them here too would multiply attempts ((N+1)^2 per provider).
     # The governor retries connection-level failures and owns fallback.
     return isinstance(exc, (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError))
-
-
-try:
-    from tenacity import (
-        AsyncRetrying,
-        retry_if_exception,
-        stop_after_attempt,
-        wait_exponential_jitter,
-    )
-
-    _HAS_TENACITY = True
-except ImportError:
-    log.warning("tenacity not installed; retry logic falls back to built-in")
-    _HAS_TENACITY = False
 
 
 # ---------------------------------------------------------------------------
@@ -106,20 +74,17 @@ async def rpm(provider_name: str):
 async def _call_once(provider_name: str, make_call: Callable[[], Awaitable[str]]) -> str:
     """Acquire a rate-limit slot then execute make_call with tenacity retry."""
     async with rpm(provider_name):
-        if _HAS_TENACITY:
-            async for attempt in AsyncRetrying(
-                retry=retry_if_exception(_is_retryable),
-                wait=wait_exponential_jitter(
-                    initial=config.RATE_LIMIT_BASE_DELAY,
-                    max=config.RATE_LIMIT_MAX_DELAY,
-                ),
-                stop=stop_after_attempt(config.RATE_LIMIT_MAX_RETRIES + 1),
-                reraise=True,
-            ):
-                with attempt:
-                    return await make_call()
-        else:
-            return await make_call()
+        async for attempt in AsyncRetrying(
+            retry=retry_if_exception(_is_retryable),
+            wait=wait_exponential_jitter(
+                initial=config.RATE_LIMIT_BASE_DELAY,
+                max=config.RATE_LIMIT_MAX_DELAY,
+            ),
+            stop=stop_after_attempt(config.RATE_LIMIT_MAX_RETRIES + 1),
+            reraise=True,
+        ):
+            with attempt:
+                return await make_call()
     # unreachable but satisfies type checkers
     raise RuntimeError("governor._call_once: unreachable")  # pragma: no cover
 

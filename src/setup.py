@@ -59,7 +59,6 @@ SPECS: dict[str, dict[str, Any]] = {
         "default_url": "https://opencode.ai/zen/v1",
         "auth": "bearer",
         "mode": "prompt",
-        "hint": "free key at opencode.ai/zen",
     },
     "openrouter": {
         "key_env": "OPENROUTER_API_KEY",
@@ -67,7 +66,6 @@ SPECS: dict[str, dict[str, Any]] = {
         "default_url": "https://openrouter.ai/api/v1",
         "auth": "bearer",
         "mode": "prompt",
-        "hint": "hundreds of models, many free",
     },
     "anthropic": {
         "key_env": "ANTHROPIC_API_KEY",
@@ -75,15 +73,13 @@ SPECS: dict[str, dict[str, Any]] = {
         "default_url": "https://api.anthropic.com/v1",
         "auth": "x-api-key",
         "mode": "prompt",
-        "hint": "optional - native prompt caching",
     },
     "openai": {
         "key_env": "OPENAI_API_KEY",
         "url_env": "OPENAI_BASE_URL",
         "default_url": "https://api.openai.com/v1",
         "auth": "bearer",
-        "mode": "import",
-        "hint": "or OPENAI_BASE_URL for any OpenAI-compatible endpoint",
+        "mode": "prompt",
     },
     "local": {
         "key_env": "LOCAL_API_KEY",
@@ -91,7 +87,6 @@ SPECS: dict[str, dict[str, Any]] = {
         "default_url": DEFAULT_LOCAL_URL,
         "auth": "bearer",
         "mode": "local",
-        "hint": "llama.cpp / Ollama / vLLM, no key needed",
     },
 }
 
@@ -200,20 +195,12 @@ def check_key(
     spec = SPECS[name]
     headers = _auth_headers(spec["auth"], key)
     try:
-        if spec["auth"] == "x-api-key":
-            payload: dict[str, Any] = {
-                "model": model,
-                "max_tokens": 1,
-                "messages": [{"role": "user", "content": "hi"}],
-            }
-            path = "/messages"
-        else:
-            payload = {
-                "model": model,
-                "max_tokens": 1,
-                "messages": [{"role": "user", "content": "hi"}],
-            }
-            path = "/chat/completions"
+        payload: dict[str, Any] = {
+            "model": model,
+            "max_tokens": 1,
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+        path = "/messages" if spec["auth"] == "x-api-key" else "/chat/completions"
         client = httpx.Client(transport=transport, headers=headers, timeout=timeout)
         r = client.post(base_url.rstrip("/") + path, json=payload)
         client.close()
@@ -570,7 +557,7 @@ def run_auto(paid: bool = False) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _prompt_key(label: str, current: str, optional: bool) -> str:
+def _prompt_key(label: str, current: str) -> str:
     if current:
         masked = current[:6] + "..." + current[-4:] if len(current) > 12 else "***"
         ans = input(f"{label}: key {masked} found. Replace? [y/N] ")
@@ -578,8 +565,7 @@ def _prompt_key(label: str, current: str, optional: bool) -> str:
             return current
         ans = getpass.getpass(f"New {label} API key: ")
     else:
-        hint = "Enter = skip" if optional else "Enter = skip"
-        ans = getpass.getpass(f"{label} API key ({hint}): ")
+        ans = getpass.getpass(f"{label} API key (Enter = skip): ")
     return ans.strip()
 
 
@@ -601,12 +587,10 @@ def run_interactive() -> int:
             if not url:
                 continue
             urls[name] = url
-            key = _prompt_key("Local", os.environ.get(env_key, ""), optional=True)
+            key = _prompt_key("Local", os.environ.get(env_key, ""))
             keys[name] = key or "ollama"
             continue
-        key = _prompt_key(
-            name, current, optional=(spec["mode"] == "prompt" and name == "anthropic")
-        )
+        key = _prompt_key(name, current)
         if key:
             keys[name] = key
         elif current:

@@ -73,18 +73,12 @@ def resolve(ref: str) -> tuple[Provider, str]:
     Raises KeyError (via config.get_provider) if the provider is not
     configured, with a clear error message pointing to the missing key.
     """
-    if "/" not in ref:
-        raise ValueError(
-            f"Invalid model reference {ref!r}: expected 'provider/model-id' format "
-            "(e.g. 'zen/deepseek-r1-0528')."
-        )
-    provider_name, model = ref.split("/", 1)
-    provider = config.get_provider(provider_name)
-    return provider, model
+    provider_name, model = resolve_name(ref)
+    return config.get_provider(provider_name), model
 
 
 def resolve_name(ref: str) -> tuple[str, str]:
-    """Like resolve() but returns (provider_name, model) instead of the Provider object."""
+    """Resolve a 'provider/model' reference to (provider_name, model)."""
     if "/" not in ref:
         raise ValueError(f"Invalid model reference {ref!r}: expected 'provider/model-id'.")
     provider_name, model = ref.split("/", 1)

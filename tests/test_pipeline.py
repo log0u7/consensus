@@ -21,18 +21,18 @@ from src.models import ConsensusReport, CostSummary, PipelineResult, Usage  # no
 def _patch_agents(monkeypatch):
     """Monkeypatch all four agent functions with fast fakes."""
 
-    async def fake_write_code(spec, context="", provider=None, model=None):
+    async def fake_write_code(spec, context="", provider=None, model=None, **kw):
         return {"language": "python", "code": "x = 1", "notes": "", "files": []}
 
-    async def fake_review(member, code):
+    async def fake_review(member, code, **kw):
         from src.models import Review
 
         return Review(reviewer=member["name"], ok=True, issues=[])
 
-    async def fake_consensus(reviews):
+    async def fake_consensus(reviews, **kw):
         return ConsensusReport(panel=[r.reviewer for r in reviews], summary="ok")
 
-    async def fake_verdict(spec, code, cj):
+    async def fake_verdict(spec, code, cj, **kw):
         return {"verdict": "APPROVE", "rationale": "fine", "final_code": code, "files": []}
 
     monkeypatch.setattr(agents, "write_code", fake_write_code)

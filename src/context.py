@@ -53,10 +53,6 @@ class AgentContext:
         """Rough token estimate of the volatile part (RAG + spec)."""
         return len(self.user) // 4
 
-    @property
-    def total_tokens(self) -> int:
-        return self.system_tokens + self.user_tokens
-
 
 def _format_tools(tool_defs: list[dict]) -> str:
     """Format MCP tool definitions for injection into the system prompt."""

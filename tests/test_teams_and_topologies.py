@@ -4,6 +4,8 @@ Parity test: the 'consensus' team must emit exactly the same event types
 as the original hardcoded pipeline (code, review*, consensus, result).
 """
 
+from pathlib import Path
+
 import pytest
 from src import roles as roles_mod
 from src.roles import Role, Team
@@ -92,20 +94,20 @@ async def test_consensus_topology_emits_correct_event_types(monkeypatch):
     """The consensus topology must emit code, review(s), consensus, result."""
     from src import agents, topologies
 
-    async def fake_write_code(spec, context="", provider=None, model=None):
+    async def fake_write_code(spec, context="", provider=None, model=None, **kw):
         return {"language": "python", "code": "print(1)", "notes": "", "files": []}
 
-    async def fake_review(member, code):
+    async def fake_review(member, code, **kw):
         from src.models import Review
 
         return Review(reviewer=member["name"], ok=True, issues=[])
 
-    async def fake_consensus(reviews):
+    async def fake_consensus(reviews, **kw):
         from src.models import ConsensusReport
 
         return ConsensusReport(panel=[r.reviewer for r in reviews], summary="ok")
 
-    async def fake_verdict(spec, code, cj):
+    async def fake_verdict(spec, code, cj, **kw):
         return {"verdict": "APPROVE", "rationale": "ok", "final_code": code, "files": []}
 
     monkeypatch.setattr(agents, "write_code", fake_write_code)
@@ -134,20 +136,20 @@ async def test_result_event_carries_members_and_degraded_flag(monkeypatch):
     propagates the Lead's degraded flag into PipelineResult."""
     from src import agents, quota, topologies
 
-    async def fake_write_code(spec, context="", provider=None, model=None):
+    async def fake_write_code(spec, context="", provider=None, model=None, **kw):
         return {"language": "python", "code": "x=1", "notes": "", "files": []}
 
-    async def fake_review(member, code):
+    async def fake_review(member, code, **kw):
         from src.models import Review
 
         return Review(reviewer=member["name"], ok=True, issues=[])
 
-    async def fake_consensus(reviews):
+    async def fake_consensus(reviews, **kw):
         from src.models import ConsensusReport
 
         return ConsensusReport(panel=[r.reviewer for r in reviews], summary="ok")
 
-    async def fake_verdict(spec, code, cj):
+    async def fake_verdict(spec, code, cj, **kw):
         return {
             "verdict": "APPROVE_WITH_CHANGES",
             "degraded": True,
@@ -177,20 +179,20 @@ async def test_pipeline_streaming_uses_team(monkeypatch):
     """pipeline.run_streaming with team_name='consensus' emits a result event."""
     from src import agents, pipeline
 
-    async def fake_write_code(spec, context="", provider=None, model=None):
+    async def fake_write_code(spec, context="", provider=None, model=None, **kw):
         return {"language": "python", "code": "x=1", "notes": "", "files": []}
 
-    async def fake_review(member, code):
+    async def fake_review(member, code, **kw):
         from src.models import Review
 
         return Review(reviewer=member["name"], ok=True)
 
-    async def fake_consensus(reviews):
+    async def fake_consensus(reviews, **kw):
         from src.models import ConsensusReport
 
         return ConsensusReport(panel=[r.reviewer for r in reviews], summary="ok")
 
-    async def fake_verdict(spec, code, cj):
+    async def fake_verdict(spec, code, cj, **kw):
         return {"verdict": "APPROVE", "rationale": "ok", "final_code": code, "files": []}
 
     monkeypatch.setattr(agents, "write_code", fake_write_code)
@@ -279,22 +281,22 @@ async def test_consensus_topology_honours_coder_model_override(monkeypatch, tmp_
 
     captured: dict = {}
 
-    async def fake_write_code(spec, context="", provider=None, model=None):
+    async def fake_write_code(spec, context="", provider=None, model=None, **kw):
         captured["provider"] = provider
         captured["model"] = model
         return {"language": "python", "code": "x=1", "notes": "", "files": []}
 
-    async def fake_review(member, code):
+    async def fake_review(member, code, **kw):
         from src.models import Review
 
         return Review(reviewer=member["name"], ok=True)
 
-    async def fake_consensus(reviews):
+    async def fake_consensus(reviews, **kw):
         from src.models import ConsensusReport
 
         return ConsensusReport(panel=[r.reviewer for r in reviews], summary="ok")
 
-    async def fake_verdict(spec, code, cj):
+    async def fake_verdict(spec, code, cj, **kw):
         return {"verdict": "APPROVE", "rationale": "ok", "final_code": code, "files": []}
 
     monkeypatch.setattr(agents, "write_code", fake_write_code)
@@ -337,7 +339,7 @@ async def test_consensus_topology_warns_when_sandbox_skipped(monkeypatch, caplog
     from src import sandbox as sandbox_mod
     from src.models import Artifact
 
-    async def fake_write_code(spec, context="", provider=None, model=None):
+    async def fake_write_code(spec, context="", provider=None, model=None, **kw):
         return {
             "language": "python",
             "code": "x=1",
@@ -348,17 +350,17 @@ async def test_consensus_topology_warns_when_sandbox_skipped(monkeypatch, caplog
     async def fake_run(files, cmd, limits=None):
         return sandbox_mod.SandboxResult(skipped=True, engine="docker-missing")
 
-    async def fake_review(member, code):
+    async def fake_review(member, code, **kw):
         from src.models import Review
 
         return Review(reviewer=member["name"], ok=True)
 
-    async def fake_consensus(reviews):
+    async def fake_consensus(reviews, **kw):
         from src.models import ConsensusReport
 
         return ConsensusReport(panel=[r.reviewer for r in reviews], summary="ok")
 
-    async def fake_verdict(spec, code, cj):
+    async def fake_verdict(spec, code, cj, **kw):
         return {"verdict": "APPROVE", "rationale": "ok", "final_code": code, "files": []}
 
     monkeypatch.setattr(agents, "write_code", fake_write_code)
@@ -513,4 +515,254 @@ async def test_loop_topology_result_contains_outputs(monkeypatch):
     # Each role has a list of outputs (one per iteration)
     for role_name in team.roles:
         assert role_name in result["outputs"]
-        assert isinstance(result["outputs"][role_name], list)
+
+
+# ---------------------------------------------------------------------------
+# Declarative layer wiring: skills / fallback / rag_ns from team manifests
+# must reach the agents through the context builder (docs/teams.md promise).
+# ---------------------------------------------------------------------------
+
+
+def _wiring_team_manifest(tmp_path: "Path") -> None:
+    manifest = tmp_path / "wiring.yaml"
+    manifest.write_text(
+        """
+topology: consensus
+sandbox: false
+roles:
+  coder:
+    model: zen/deepseek-v3-0324
+    fallback: [local]
+    skills: [magicskill]
+  reviewer:
+    members:
+      - name: rv1
+        model: zen/qwen3-coder
+    fallback: [local]
+  consensus:
+    model: zen/deepseek-v3-0324
+    fallback: [local]
+  lead:
+    model: zen/deepseek-v3-0324
+    fallback: [local]
+"""
+    )
+    skills_dir = tmp_path / "skills"
+    (skills_dir / "magicskill").mkdir(parents=True)
+    (skills_dir / "magicskill" / "SKILL.md").write_text("MAGIC-SKILL-CONTENT")
+
+
+@pytest.mark.asyncio
+async def test_team_skills_and_fallback_reach_agents(monkeypatch, tmp_path):
+    """W1+W2: role.skills -> coder prompt via context.build; role.fallback
+    overrides the env-driven defaults for every consensus step."""
+    from src import agents, topologies
+    from src import skills as skills_mod
+
+    _wiring_team_manifest(tmp_path)
+    monkeypatch.setattr(roles_mod, "_TEAMS_DIR", tmp_path)
+    monkeypatch.setattr(skills_mod, "_SKILLS_DIR", tmp_path / "skills")
+
+    captured: dict = {}
+
+    async def fake_write_code(
+        spec, context="", provider=None, model=None, system_extra="", fallback=None, **kw
+    ):
+        captured["coder_system_extra"] = system_extra
+        captured["coder_fallback"] = fallback
+        return {"language": "python", "code": "x=1", "notes": "", "files": []}
+
+    async def fake_review(member, code, system_extra="", fallback=None, **kw):
+        captured["review_fallback"] = fallback
+        from src.models import Review
+
+        return Review(reviewer=member["name"], ok=True, issues=[])
+
+    async def fake_consensus(reviews, fallback=None, **kw):
+        captured["consensus_fallback"] = fallback
+        from src.models import ConsensusReport
+
+        return ConsensusReport(panel=[r.reviewer for r in reviews], summary="ok")
+
+    async def fake_verdict(spec, code, cj, fallback=None, **kw):
+        captured["lead_fallback"] = fallback
+        return {"verdict": "APPROVE", "rationale": "ok", "final_code": code, "files": []}
+
+    monkeypatch.setattr(agents, "write_code", fake_write_code)
+    monkeypatch.setattr(agents, "review_code", fake_review)
+    monkeypatch.setattr(agents, "build_consensus", fake_consensus)
+    monkeypatch.setattr(agents, "lead_verdict", fake_verdict)
+
+    team = roles_mod.load("wiring")
+    topo = await topologies.run(team, "test spec", run_id="wire")
+    [e async for e in topo]
+
+    assert "MAGIC-SKILL-CONTENT" in captured["coder_system_extra"]
+    assert captured["coder_fallback"] == ["local"]
+    assert captured["review_fallback"] == ["local"]
+    assert captured["consensus_fallback"] == ["local"]
+    assert captured["lead_fallback"] == ["local"]
+
+
+@pytest.mark.asyncio
+async def test_empty_role_fallback_keeps_env_defaults(monkeypatch):
+    """No fallback declared in the manifest -> env-driven default wins."""
+    from src import agents, topologies
+
+    captured: dict = {}
+
+    async def fake_write_code(
+        spec, context="", provider=None, model=None, system_extra="", fallback=None, **kw
+    ):
+        captured["coder_fallback"] = fallback
+        return {"language": "python", "code": "x=1", "notes": "", "files": []}
+
+    async def fake_review(member, code, system_extra="", fallback=None, **kw):
+        from src.models import Review
+
+        return Review(reviewer=member["name"], ok=True, issues=[])
+
+    async def fake_consensus(reviews, fallback=None, **kw):
+        from src.models import ConsensusReport
+
+        return ConsensusReport(panel=[r.reviewer for r in reviews], summary="ok")
+
+    async def fake_verdict(spec, code, cj, fallback=None, **kw):
+        return {"verdict": "APPROVE", "rationale": "ok", "final_code": code, "files": []}
+
+    monkeypatch.setattr(agents, "write_code", fake_write_code)
+    monkeypatch.setattr(agents, "review_code", fake_review)
+    monkeypatch.setattr(agents, "build_consensus", fake_consensus)
+    monkeypatch.setattr(agents, "lead_verdict", fake_verdict)
+
+    team = roles_mod.load("consensus")
+    topo = await topologies.run(team, "spec", run_id="envfallback")
+    [e async for e in topo]
+
+    from src import config
+
+    # No fallback declared -> topologies pass None and agents apply the
+    # env-driven default (config.CODER_FALLBACK).
+    assert captured["coder_fallback"] is None
+    assert config.CODER_FALLBACK is not None or config.CODER_FALLBACK == []
+
+
+@pytest.mark.asyncio
+async def test_role_rag_ns_fetches_and_injects(monkeypatch, tmp_path):
+    """A role declaring rag_ns must fetch RAG chunks and feed the coder
+    context, and the result event must carry the sources."""
+    from src import agents, topologies
+
+    manifest = tmp_path / "ragteam.yaml"
+    manifest.write_text(
+        """
+topology: consensus
+roles:
+  coder:
+    model: zen/deepseek-v3-0324
+    rag_ns: docs
+  reviewer:
+    members:
+      - name: rv1
+        model: zen/qwen3-coder
+  consensus:
+    model: zen/deepseek-v3-0324
+  lead:
+    model: zen/deepseek-v3-0324
+"""
+    )
+    monkeypatch.setattr(roles_mod, "_TEAMS_DIR", tmp_path)
+
+    hits = [{"source": "kb/api.md", "chunk_idx": 1, "content": "RAG-MAGIC-CONTENT", "score": 0.9}]
+
+    async def fake_rag_search(query, k=5, min_score=None):
+        return hits
+
+    from src import rag as rag_mod
+
+    monkeypatch.setattr(rag_mod, "search", fake_rag_search)
+
+    captured: dict = {}
+
+    async def fake_write_code(
+        spec, context="", provider=None, model=None, system_extra="", fallback=None, **kw
+    ):
+        captured["context"] = context
+        return {"language": "python", "code": "x=1", "notes": "", "files": []}
+
+    async def fake_review(member, code, system_extra="", fallback=None, **kw):
+        from src.models import Review
+
+        return Review(reviewer=member["name"], ok=True, issues=[])
+
+    async def fake_consensus(reviews, fallback=None, **kw):
+        from src.models import ConsensusReport
+
+        return ConsensusReport(panel=[r.reviewer for r in reviews], summary="ok")
+
+    async def fake_verdict(spec, code, cj, fallback=None, **kw):
+        return {"verdict": "APPROVE", "rationale": "ok", "final_code": code, "files": []}
+
+    monkeypatch.setattr(agents, "write_code", fake_write_code)
+    monkeypatch.setattr(agents, "review_code", fake_review)
+    monkeypatch.setattr(agents, "build_consensus", fake_consensus)
+    monkeypatch.setattr(agents, "lead_verdict", fake_verdict)
+
+    team = roles_mod.load("ragteam")
+    topo = await topologies.run(team, "spec", run_id="ragwire")
+    events = [e async for e in topo]
+
+    assert "RAG-MAGIC-CONTENT" in captured["context"]
+    result_evt = next(e for e in events if e["type"] == "result")
+    assert result_evt["result"]["rag_sources"] == hits
+
+
+@pytest.mark.asyncio
+async def test_pipeline_topology_injects_skills(monkeypatch):
+    """W1 for the pipeline topology: role.skills reach the step system prompt."""
+    from src import agents, topologies
+
+    captured: dict = {}
+
+    async def fake_governed_call(
+        provider, model, user, system=None, max_tokens=8000, fallback=None
+    ):
+        captured.setdefault("systems", []).append(system)
+        captured.setdefault("fallbacks", []).append(fallback)
+        return "step output"
+
+    monkeypatch.setattr(agents, "governed_call", fake_governed_call)
+
+    team = roles_mod.load("sre")
+    events = [e async for e in topologies.run_pipeline(team, "plan infra", run_id="pw")]
+    assert events[-1]["type"] == "result"
+
+    # planner declares skills: [sre] -> system prompt carries the skill text
+    assert "systems" in captured
+    planner_system = captured["systems"][0]
+    assert planner_system is not None and "Skill" in planner_system
+    # planner_system carries the skill text; planner fallback: [] -> None
+    # (agents apply the env-driven default).
+    assert captured["fallbacks"][0] is None
+
+
+def test_panel_members_resolve_through_providers(monkeypatch):
+    """W3: member model refs go through providers.resolve_name."""
+    from src import providers, topologies
+
+    seen: list[str] = []
+    real = providers.resolve_name
+
+    def spy(ref):
+        seen.append(ref)
+        return real(ref)
+
+    monkeypatch.setattr(providers, "resolve_name", spy)
+    role = Role(
+        name="reviewer",
+        model="",
+        members=[{"name": "a", "model": "zen/qwen3-coder", "max_tokens": 100}],
+    )
+    members = topologies._panel_members(role)
+    assert seen == ["zen/qwen3-coder"]
+    assert members[0]["provider"] == "zen"

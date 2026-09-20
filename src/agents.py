@@ -134,12 +134,16 @@ async def write_code(
     context: str = "",
     provider: str | None = None,
     model: str | None = None,
+    system_extra: str = "",
+    fallback: list[str] | None = None,
 ) -> dict:
     """Coder step. provider/model override the quota profile (team manifest);
-    when either is missing the quota profile decides."""
+    when either is missing the quota profile decides. system_extra extends the
+    system prompt (declared skills/tools); fallback overrides CODER_FALLBACK."""
     user = spec if not context else f"Internal context:\n{context}\n\nTask:\n{spec}"
     if provider is None or model is None:
         provider, model = quota.coder_model()
+    system = f"{_CODER_SYS}\n\n{system_extra}" if system_extra else _CODER_SYS
     tok = llm.set_step("coder")
     try:
         data = await _governed_json(
@@ -148,10 +152,10 @@ async def write_code(
                 prov,
                 model,
                 user + (llm._JSON_RETRY_HINT if attempt else ""),
-                _CODER_SYS,
+                system,
                 max_tokens=config.CODER_MAX_TOKENS,
             ),
-            config.CODER_FALLBACK,
+            fallback if fallback is not None else config.CODER_FALLBACK,
         )
     finally:
         llm.reset_step(tok)
@@ -165,7 +169,7 @@ async def write_code(
         "notes": data.get("notes", ""),
         "files": files,
         "context_stats": context_stats(
-            _CODER_SYS,
+            system,
             user,
             provider,
             model,
@@ -203,7 +207,12 @@ def review_context_stats(panel_member: dict, code: str) -> dict:
     )
 
 
-async def review_code(panel_member: dict, code: str) -> Review:
+async def review_code(
+    panel_member: dict,
+    code: str,
+    system_extra: str = "",
+    fallback: list[str] | None = None,
+) -> Review:
     """Run one reviewer. On failure, return Review(ok=False) so the panel
     stays resilient (consensus uses whoever answered)."""
     name = panel_member["name"]
@@ -211,6 +220,7 @@ async def review_code(panel_member: dict, code: str) -> Review:
     model = panel_member["model"]
     max_tokens = panel_member.get("max_tokens") or config.REVIEW_MAX_TOKENS
     user = _review_user(code)
+    system = f"{_REVIEW_SYS}\n\n{system_extra}" if system_extra else _REVIEW_SYS
     tok = llm.set_step(f"reviewer:{name}")
     try:
         data = await _governed_json(
@@ -219,10 +229,10 @@ async def review_code(panel_member: dict, code: str) -> Review:
                 prov,
                 model,
                 user + (llm._JSON_RETRY_HINT if attempt else ""),
-                _REVIEW_SYS,
+                system,
                 max_tokens=max_tokens,
             ),
-            config.REVIEWER_FALLBACK,
+            fallback if fallback is not None else config.REVIEWER_FALLBACK,
         )
         issues = []
         for i in data.get("issues", []):
@@ -272,7 +282,9 @@ def consensus_context_stats(reviews: list[Review]) -> dict:
     return context_stats(_CONSENSUS_SYS, f"Reviews:\n\n{_reviews_blob(reviews)}", provider, model)
 
 
-async def build_consensus(reviews: list[Review]) -> ConsensusReport:
+async def build_consensus(
+    reviews: list[Review], fallback: list[str] | None = None
+) -> ConsensusReport:
     participating = [r for r in reviews if r.ok]
     panel_names = [r.reviewer for r in participating]
     n = max(len(participating), 1)
@@ -294,7 +306,7 @@ async def build_consensus(reviews: list[Review]) -> ConsensusReport:
                 _CONSENSUS_SYS,
                 max_tokens=config.CONSENSUS_MAX_TOKENS,
             ),
-            config.CONSENSUS_FALLBACK,
+            fallback if fallback is not None else config.CONSENSUS_FALLBACK,
         )
     except Exception as exc:
         # Provider failure (429 bursts exhausted, network, ...): the run must
@@ -405,7 +417,9 @@ def _degraded_verdict(code: str, reason: str) -> dict:
     }
 
 
-async def lead_verdict(spec: str, code: str, consensus_json: str) -> dict:
+async def lead_verdict(
+    spec: str, code: str, consensus_json: str, fallback: list[str] | None = None
+) -> dict:
     system = LEAD_SYSTEM_TEMPLATE.format(spec=spec, code=code, consensus=consensus_json)
     provider, model = quota.lead_model()
     tok = llm.set_step("lead")
@@ -423,7 +437,7 @@ async def lead_verdict(spec: str, code: str, consensus_json: str) -> dict:
                 system,
                 max_tokens=_budget(attempt),
             ),
-            config.LEAD_FALLBACK,
+            fallback if fallback is not None else config.LEAD_FALLBACK,
         )
     except ValueError as exc:
         log.warning("lead verdict unparseable, returning degraded verdict: %s", exc)

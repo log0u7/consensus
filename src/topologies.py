@@ -20,12 +20,18 @@ import logging
 import time
 from collections.abc import AsyncIterator, Callable
 
-from . import agents, config, llm, pricing, quota
+from . import agents, config, llm, pricing, providers, quota
 from . import sandbox as sandbox_mod
+from .context import build as build_context
 from .models import ConsensusReport, PipelineResult, SandboxResult, summarize_usage
 from .roles import Role, Team
 
 log = logging.getLogger(__name__)
+
+
+def _rag_context_text(hits: list[dict]) -> str:
+    """Compact RAG text for the 'Internal context' block (pipeline format)."""
+    return "\n\n".join(f"[{h['source']}]\n{h['content']}" for h in hits)
 
 
 def _context_event(stats: dict) -> dict:
@@ -49,7 +55,7 @@ def _panel_members(reviewer_role: Role) -> list[dict]:
         return [
             {
                 "name": m["name"],
-                "provider": m["model"].split("/", 1)[0] if "/" in m["model"] else "zen",
+                "provider": providers.resolve_name(m["model"])[0] if "/" in m["model"] else "zen",
                 "model": m["model"].split("/", 1)[1] if "/" in m["model"] else m["model"],
                 "max_tokens": m.get("max_tokens"),
             }
@@ -83,13 +89,36 @@ async def run_consensus(
 
         coder_role = team.roles.get("coder")
         reviewer_role = team.roles.get("reviewer")
+        consensus_role = team.roles.get("consensus")
+        lead_role = team.roles.get("lead")
+
+        # Declarative context (team manifest): skills/tools -> system prefix,
+        # role-level rag_ns -> coder context. Pipeline pre-fetched RAG (if any)
+        # is reused; a rag_ns hit list is formatted pipeline-style.
+        coder_system_extra = ""
+        if coder_role and (coder_role.skills or coder_role.rag_ns):
+            ctx = await build_context(spec=spec, role=coder_role, rag_hits=rag_sources or None)
+            coder_system_extra = ctx.system
+            rag_sources = ctx.rag_sources or rag_sources
+            if ctx.rag_sources and not context:
+                context = _rag_context_text(ctx.rag_sources)
 
         # 1. Code (team manifest may pin the coder model; otherwise quota decides)
+        coder_fallback = coder_role.fallback or None if coder_role else None
         if coder_role and coder_role.model:
-            prov, mod = coder_role.model.split("/", 1)
-            coded = await agents.write_code(spec, context, provider=prov, model=mod)
+            prov, mod = providers.resolve_name(coder_role.model)
+            coded = await agents.write_code(
+                spec,
+                context,
+                provider=prov,
+                model=mod,
+                system_extra=coder_system_extra,
+                fallback=coder_fallback,
+            )
         else:
-            coded = await agents.write_code(spec, context)
+            coded = await agents.write_code(
+                spec, context, system_extra=coder_system_extra, fallback=coder_fallback
+            )
         code = coded["code"]
         rlog("info", "coder done (%.1fs)", time.perf_counter() - t0)
         # Panel members resolved BEFORE the code event so the UI knows the
@@ -144,10 +173,26 @@ async def run_consensus(
         # Inject execution output into code context for panel.
         panel_code = code if not sandbox_context else f"{code}\n\n{sandbox_context}"
 
-        # 2. Panel (parallel, resilient)
+        # 2. Panel (parallel, resilient). Reviewer skills from the manifest
+        # extend every reviewer's system prompt.
+        reviewer_system_extra = ""
+        if reviewer_role and (reviewer_role.skills or reviewer_role.rag_ns):
+            rctx = await build_context(spec=panel_code, role=reviewer_role)
+            reviewer_system_extra = rctx.system
+        reviewer_fallback = reviewer_role.fallback or None if reviewer_role else None
         t_panel = time.perf_counter()
         reviews: list = []
-        tasks = [asyncio.create_task(agents.review_code(m, panel_code)) for m in members]
+        tasks = [
+            asyncio.create_task(
+                agents.review_code(
+                    m,
+                    panel_code,
+                    system_extra=reviewer_system_extra,
+                    fallback=reviewer_fallback,
+                )
+            )
+            for m in members
+        ]
         for fut in asyncio.as_completed(tasks):
             review = await fut
             reviews.append(review)
@@ -167,7 +212,9 @@ async def run_consensus(
         )
 
         # 3. Consensus
-        consensus: ConsensusReport = await agents.build_consensus(reviews)
+        consensus: ConsensusReport = await agents.build_consensus(
+            reviews, fallback=consensus_role.fallback or None if consensus_role else None
+        )
         yield {
             "type": "consensus",
             "consensus": consensus.model_dump(),
@@ -176,7 +223,12 @@ async def run_consensus(
         }
 
         # 4. Lead verdict
-        verdict = await agents.lead_verdict(spec, code, consensus.model_dump_json())
+        verdict = await agents.lead_verdict(
+            spec,
+            code,
+            consensus.model_dump_json(),
+            fallback=lead_role.fallback or None if lead_role else None,
+        )
         files = verdict["files"] or coded["files"]
 
         summary = summarize_usage(usages)
@@ -245,21 +297,30 @@ async def run_pipeline(
 
         for role_name in role_names:
             role = team.roles[role_name]
-            prov, mod = role.model.split("/", 1) if "/" in role.model else quota.coder_model()
             user = (
                 f"Task: {spec}\n\nContext so far:\n{accumulated}"
                 if accumulated
                 else f"Task: {spec}"
             )
+            # Declarative context: skills -> system prompt, rag_ns -> user.
+            system_extra = ""
+            if role.skills or role.rag_ns:
+                ctx = await build_context(spec=user, role=role, rag_hits=rag_sources or None)
+                system_extra = ctx.system
+                user = ctx.user
 
+            prov, mod = (
+                providers.resolve_name(role.model) if "/" in role.model else quota.coder_model()
+            )
             tok = llm.set_step(role_name)
             try:
                 output = await agents.governed_call(
                     prov,
                     mod,
                     user,
+                    system=system_extra or None,
                     max_tokens=role.max_tokens or config.CODER_MAX_TOKENS,
-                    fallback=config.CODER_FALLBACK,
+                    fallback=role.fallback or None,
                 )
             finally:
                 llm.reset_step(tok)
@@ -321,11 +382,20 @@ async def run_loop(
             rlog("info", "loop iteration %d", i)
             for role_name in role_names:
                 role = team.roles[role_name]
-                prov, mod = role.model.split("/", 1) if "/" in role.model else quota.coder_model()
                 user = (
                     f"Iteration {i}. Task: {spec}\n\nContext so far:\n{accumulated}"
                     if accumulated
                     else f"Iteration {i}. Task: {spec}"
+                )
+                # Declarative context: skills -> system prompt, rag_ns -> user.
+                system_extra = ""
+                if role.skills or role.rag_ns:
+                    ctx = await build_context(spec=user, role=role, rag_hits=rag_sources or None)
+                    system_extra = ctx.system
+                    user = ctx.user
+
+                prov, mod = (
+                    providers.resolve_name(role.model) if "/" in role.model else quota.coder_model()
                 )
                 tok = llm.set_step(f"{role_name}:{i}")
                 try:
@@ -333,8 +403,9 @@ async def run_loop(
                         prov,
                         mod,
                         user,
+                        system=system_extra or None,
                         max_tokens=role.max_tokens or config.CODER_MAX_TOKENS,
-                        fallback=config.CODER_FALLBACK,
+                        fallback=role.fallback or None,
                     )
                 finally:
                     llm.reset_step(tok)

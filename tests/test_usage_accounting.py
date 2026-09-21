@@ -269,9 +269,12 @@ def test_summarize_usage_aggregates_cached_and_by_provider():
     by = {p.provider: p for p in cs.by_provider}
     assert set(by) == {"anthropic", "local", "zen"}
     assert by["zen"].calls == 2
+    assert by["zen"].input_tokens == 150  # 100 + 50 summed across usages
+    assert by["zen"].output_tokens == 15
     assert by["zen"].cached_tokens == 70
     assert by["zen"].cost == pytest.approx(0.3)
     assert by["zen"].cost_known is True
+    assert by["local"].input_tokens == 30
     assert by["local"].cost_known is True  # local reports 0.0 (known free)
     assert by["anthropic"].cost == 0.0
     assert by["anthropic"].cost_known is False

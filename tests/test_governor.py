@@ -30,6 +30,21 @@ async def test_call_succeeds_first_try():
     assert out == "result"
 
 
+def test_limiter_caps_per_provider(monkeypatch):
+    """One AsyncLimiter per provider: max(RPM, 10000-unlimited-floor), 60s window."""
+    monkeypatch.setenv("RPM_ZEN", "60000")  # above the floor -> visible in max_rate
+    monkeypatch.setenv("RPM_LOCAL", "0")  # 0 means unlimited -> floor value
+    governor._LIMITERS.clear()
+
+    zen = governor._limiter("zen")
+    local = governor._limiter("local")
+    assert zen.max_rate == 60000
+    assert local.max_rate == 10000  # the unlimited floor
+    assert zen.time_period == 60
+    assert zen is governor._limiter("zen")  # cached per provider
+    governor._LIMITERS.clear()
+
+
 @pytest.mark.asyncio
 async def test_call_uses_fallback_on_failure(monkeypatch):
     """When the primary provider raises, the fallback provider is tried."""

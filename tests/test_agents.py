@@ -181,6 +181,13 @@ async def test_review_code_normalizes_severity(monkeypatch):
                         "location": "line 2",
                         "description": "d",
                     },
+                    {
+                        "title": "unknown category",
+                        "severity": "low",
+                        "category": "BOGUS",  # unknown -> default "correctness"
+                        "location": "line 3",
+                        "description": "d",
+                    },
                 ],
                 "overall": "mixed",
             }
@@ -189,9 +196,10 @@ async def test_review_code_normalizes_severity(monkeypatch):
     member = {"name": "r2", "provider": "zen", "model": "x"}
     review = await agents.review_code(member, "code")
     assert review.ok is True
-    assert len(review.issues) == 2
+    assert len(review.issues) == 3
     assert review.issues[0].severity == "critical"  # normalised from CRITICAL
     assert review.issues[1].severity == "medium"  # default for unknown
+    assert review.issues[2].category == "correctness"  # default for unknown
 
 
 # ---------------------------------------------------------------------------

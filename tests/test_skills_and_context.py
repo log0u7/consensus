@@ -66,6 +66,23 @@ async def test_build_no_skills():
 
 
 @pytest.mark.asyncio
+async def test_build_prefetched_rag_hits_win_over_rag_ns(monkeypatch):
+    """role.rag_ns set AND rag_hits given -> must reuse the given hits, not fetch."""
+    from src import rag
+
+    role = Role(name="coder", model="zen/deepseek-v3-0324", rag_ns="kb")
+    hits = [{"source": "pre.md", "chunk_idx": 0, "content": "prefetched"}]
+
+    async def boom(*a, **kw):
+        raise AssertionError("rag.search must not be called when rag_hits are provided")
+
+    monkeypatch.setattr(rag, "search", boom)
+    ctx = await build("spec", role, rag_hits=hits)
+    assert ctx.rag_sources == hits
+    assert "prefetched" in ctx.user
+
+
+@pytest.mark.asyncio
 async def test_build_with_tools():
     role = Role(name="coder", model="zen/deepseek-v3-0324")
     tools = [{"name": "read_file", "description": "Read a file", "input_schema": {}}]

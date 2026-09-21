@@ -112,7 +112,7 @@ async def test_run_streaming_no_rag_by_default(monkeypatch):
 
     monkeypatch.setattr(rag_mod, "search", fake_rag_search)
 
-    [e async for e in pipeline.run_streaming("spec", use_rag=False)]
+    [e async for e in pipeline.run_streaming("spec")]  # use_rag defaults to False
     assert not rag_called["v"]
 
 

@@ -68,6 +68,19 @@ def test_dump_load_empty_history():
     assert loaded["history"] == []
 
 
+def test_dump_defaults_for_missing_keys():
+    """Absent keys must fall back to serializable defaults (postgres JSONB)."""
+    dumped = _dump({"result": PipelineResult(spec="s", code="c", consensus=ConsensusReport())})
+    assert dumped["system"] == ""
+    assert dumped["history"] == []
+    assert dumped["members"] == []
+
+    loaded = _load(dumped)
+    assert loaded["system"] == ""
+    assert loaded["history"] == []
+    assert loaded["members"] == []
+
+
 def test_dump_result_is_json_serializable():
     """The dumped result dict must be JSON-serializable (for Postgres backend)."""
     import json

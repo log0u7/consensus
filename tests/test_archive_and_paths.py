@@ -18,7 +18,7 @@ def test_sanitize_backslash_and_drive():
 
 
 def test_sanitize_rejects_traversal():
-    for bad in ["../escape", "..", "", "a/../../b"]:
+    for bad in ["../escape", "..", "", "a/../../b", "C:", "C:\\"]:
         with pytest.raises(ValueError):
             sanitize_path(bad)
 

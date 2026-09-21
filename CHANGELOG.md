@@ -48,6 +48,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   validators, UI reuses `readSSE`/`downloadBlob`, Makefile `test-docker`
   and `dev` targets removed (duplicated CI / `DEV=1`), unused
   `pydantic-settings` dependency removed.
+- Test suite hardened against mutation testing (one-shot mutmut run on a
+  flattened copy - mutmut 3 does not support the `src.*` import layout):
+  per-provider usage rollups, category normalization, drive-only path
+  rejection, governor limiter caps, RAG re-fetch guard, `use_rag` default,
+  session serialization defaults now all have assertions that fail when the
+  behavior regresses.
 - `pipeline/loop` role model refs and panel member model refs resolve
   through `providers.resolve_name` (single provider-resolution path).
 

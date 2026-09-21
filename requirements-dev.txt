@@ -6,3 +6,4 @@ pytest-cov==7.1.0
 ruff==0.15.20
 mypy==2.1.0
 pip-audit==2.10.1
+mutmut==3.8.0

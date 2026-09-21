@@ -283,6 +283,9 @@ CACHE_DB_PATH=cache.db
 | `make run SPEC="..."`   | Run the pipeline on the CLI                       |
 | `make index`            | Index `docs-projet/` into the RAG store           |
 | `make check`            | Lint + typecheck + test (CI entrypoint)           |
+| `make secrets`          | gitleaks scan for committed secrets               |
+| `make audit`            | pip-audit dependency CVE scan                     |
+| `make mutate`           | Mutation testing on `src/` (~13 min, triage survivors) |
 
 `DEV=1` adds hot reload. `ENV=<name>` merges `.env.<name>` and layers
 `docker-compose.<name>.yml`.

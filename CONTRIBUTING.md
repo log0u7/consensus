@@ -91,6 +91,9 @@ make format     # ruff format + autofix
 make typecheck  # mypy
 make test       # pytest (offline, no provider key needed)
 make check      # lint + typecheck + test (CI entrypoint)
+make secrets    # gitleaks scan (pre-commit + CI parity)
+make audit      # pip-audit dependency CVEs
+make mutate     # mutation testing (after touching core logic; triage survivors)
 ```
 
 Add tests for new pure logic. `make check` must be green before merging.

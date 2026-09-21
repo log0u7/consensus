@@ -152,8 +152,9 @@ tui: _env ## Run the Textual TUI (stack must be up; interactive)
 	$(DC) run --rm -it app python -m tui --api-url http://app:8000
 
 .PHONY: lint
-lint: dev-setup ## Lint with ruff
+lint: dev-setup ## Lint with ruff (checks + formatting parity with CI)
 	$(VENV)/bin/ruff check src tests tui
+	$(VENV)/bin/ruff format --check src tests tui
 
 .PHONY: format
 format: dev-setup ## Auto-format with ruff
@@ -161,12 +162,25 @@ format: dev-setup ## Auto-format with ruff
 	$(VENV)/bin/ruff check --fix src tests tui
 
 .PHONY: typecheck
-typecheck: dev-setup ## Static type check with mypy
-	$(VENV)/bin/mypy src
+typecheck: dev-setup ## Static type check with mypy (src + tui, as CI)
+	$(VENV)/bin/mypy src tui
 
 .PHONY: test
 test: dev-setup ## Run unit tests (local venv, offline)
 	$(TEST_ENV) $(PY) -m pytest
+
+.PHONY: secrets
+secrets: ## Scan for committed secrets with gitleaks (as CI does)
+	@command -v gitleaks >/dev/null 2>&1 || { echo "gitleaks not found: install v8.30.1 from https://github.com/gitleaks/gitleaks/releases"; exit 1; }
+	gitleaks git --redact -v .
+
+.PHONY: audit
+audit: dev-setup ## Dependency CVE audit (same command as the CI Security job)
+	$(VENV)/bin/pip-audit --strict
+
+.PHONY: mutate
+mutate: dev-setup ## Mutation testing on src/ (flattened harness, ~13 min; triage survivors)
+	./scripts/mutate.sh
 
 .PHONY: check
 check: lint typecheck test ## Lint + typecheck + test (the CI entrypoint)

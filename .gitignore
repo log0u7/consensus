@@ -24,3 +24,4 @@ pricing.db
 mutants/
 .mutmut-cache
 .mutmut-cache.*
+.mutmut-work/

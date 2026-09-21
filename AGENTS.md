@@ -31,7 +31,7 @@ All LLM calls go through `llm.py`; no SDK, no agent framework.
 ## Key files
 
 - `src/config.py` - env loading, `PROVIDERS` dict, panel parsing, model refs.
-- `src/providers.py` - `resolve("provider/model")` -> (Provider, model), caps.
+- `src/providers.py` - `resolve_name("provider/model")` -> (name, model), caps.
 - `src/llm.py` - two transports (openai-compatible, Anthropic Messages + SSE);
   single `_client(provider)` factory; usage capture; response cache integration.
 - `src/governor.py` - `aiolimiter` RPM + `tenacity` retry + provider fallback.
@@ -70,7 +70,7 @@ make run SPEC="write a Python class that does X"
 ## Conventions and invariants
 
 - **No SDK, no agent framework**: all provider calls through `llm.py`/`governor.py`.
-- **Provider resolution**: always through `providers.resolve()` or `config.get_provider()`.
+- **Provider resolution**: always through `providers.resolve_name()` or `config.get_provider()`.
   Never hardcode base URLs or auth headers outside `config.py`/`llm.py`.
 - **JSON from LLMs**: request strict JSON in prompts; parse with `parse_json` /
   `complete_json_obj` which repair and retry. Never `json.loads` raw LLM output directly.

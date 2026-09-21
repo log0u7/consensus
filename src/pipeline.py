@@ -53,9 +53,10 @@ async def run_streaming(
     if use_rag:
         try:
             from . import rag
+            from .context import rag_context_text
 
             hits = await rag.search(spec, k=config.RAG_TOP_K)
-            context = "\n\n".join(f"[{h['source']}]\n{h['content']}" for h in hits)
+            context = rag_context_text(hits)
             rag_sources = [
                 {"source": h["source"], "chunk_idx": h["chunk_idx"], "score": round(h["score"], 3)}
                 for h in hits

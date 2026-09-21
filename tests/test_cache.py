@@ -50,13 +50,6 @@ def test_memory_lru_eviction():
     assert len(b) == 2
 
 
-def test_memory_clear():
-    b = MemoryBackend()
-    b.set("x", "y")
-    b.clear()
-    assert len(b) == 0
-
-
 # ---------------------------------------------------------------------------
 # SQLiteBackend
 # ---------------------------------------------------------------------------
@@ -79,13 +72,6 @@ def test_sqlite_replace(tmp_path):
     b.set("k", "v2")
     assert b.get("k") == "v2"
     assert len(b) == 1
-
-
-def test_sqlite_clear(tmp_path):
-    b = SQLiteBackend(str(tmp_path / "cache.db"))
-    b.set("k", "v")
-    b.clear()
-    assert len(b) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -115,13 +101,3 @@ def test_cache_disabled_by_default(monkeypatch):
     cache_mod.put(msgs, "model", "response")  # should no-op
     assert cache_mod.get(msgs, "model") is None
     assert cache_mod.size() == 0
-
-
-def test_cache_stats(monkeypatch):
-    import src.cache as cache_mod
-
-    monkeypatch.setattr(cache_mod, "RESPONSE_CACHE", True)
-    monkeypatch.setattr(cache_mod, "_backend", MemoryBackend())
-    s = cache_mod.stats()
-    assert "enabled" in s
-    assert "entries" in s

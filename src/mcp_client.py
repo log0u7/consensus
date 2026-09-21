@@ -59,6 +59,7 @@ class MCPClientManager:
         self._server_configs = servers
         self._sessions: list[Any] = []
         self._tool_index: dict[str, Any] = {}  # tool_name -> session
+        self._tool_defs: list[dict] = []  # captured at connect; list_tools() reuses it
 
     async def __aenter__(self) -> MCPClientManager:
         try:
@@ -85,9 +86,15 @@ class MCPClientManager:
                     await session.initialize()
                     self._sessions.append(session)
                     # Index tools from this server.
-                    tools_resp = await session.list_tools()
-                    for tool in tools_resp.tools:
+                    for tool in await session.list_tools():
                         self._tool_index[tool.name] = session
+                        self._tool_defs.append(
+                            {
+                                "name": tool.name,
+                                "description": getattr(tool, "description", ""),
+                                "input_schema": getattr(tool, "inputSchema", {}),
+                            }
+                        )
                         log.debug("MCP tool registered: %s (server=%s)", tool.name, name)
                 elif transport == "http":
                     # Streamable HTTP transport (MCP 1.x standard).
@@ -107,9 +114,15 @@ class MCPClientManager:
                     await session.__aenter__()
                     await session.initialize()
                     self._sessions.append(session)
-                    tools_resp = await session.list_tools()
-                    for tool in tools_resp.tools:
+                    for tool in await session.list_tools():
                         self._tool_index[tool.name] = session
+                        self._tool_defs.append(
+                            {
+                                "name": tool.name,
+                                "description": getattr(tool, "description", ""),
+                                "input_schema": getattr(tool, "inputSchema", {}),
+                            }
+                        )
                         log.debug(
                             "MCP tool registered: %s (server=%s url=%s)", tool.name, name, url
                         )
@@ -128,20 +141,8 @@ class MCPClientManager:
                 pass
 
     async def list_tools(self) -> list[dict]:
-        """Return all available tools as a list of {name, description, schema} dicts."""
-        result = []
-        for name, session in self._tool_index.items():
-            tools_resp = await session.list_tools()
-            for t in tools_resp.tools:
-                if t.name == name:
-                    result.append(
-                        {
-                            "name": t.name,
-                            "description": getattr(t, "description", ""),
-                            "input_schema": getattr(t, "inputSchema", {}),
-                        }
-                    )
-        return result
+        """All available tools ({name, description, schema}), captured at connect."""
+        return list(self._tool_defs)
 
     async def call_tool(self, name: str, arguments: dict) -> str:
         """Call a tool by name and return its result as a string."""

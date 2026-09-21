@@ -104,7 +104,7 @@ on the installed environment and `gitleaks` over the full history.
 ```
 src/
   config.py      env loading, provider registry (PROVIDERS), panel parsing
-  providers.py   resolve("provider/model") -> Provider + caps metadata
+  providers.py   resolve_name("provider/model") -> (name, model) + caps metadata
   llm.py         httpx transports (openai-compatible + Anthropic Messages + SSE)
   governor.py    rate-limit (aiolimiter) + retry (tenacity) + fallback chain
   agents.py      coder, reviewer, consensus, lead - all go through governor

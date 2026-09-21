@@ -24,16 +24,12 @@ from . import agents, config, llm, pricing, providers, quota
 from . import sandbox as sandbox_mod
 from .agents import ToolRuntime
 from .context import build as build_context
+from .context import rag_context_text
 from .mcp_client import MCPClientManager
 from .models import ConsensusReport, PipelineResult, SandboxResult, summarize_usage
 from .roles import Role, Team
 
 log = logging.getLogger(__name__)
-
-
-def _rag_context_text(hits: list[dict]) -> str:
-    """Compact RAG text for the 'Internal context' block (pipeline format)."""
-    return "\n\n".join(f"[{h['source']}]\n{h['content']}" for h in hits)
 
 
 def _context_event(stats: dict) -> dict:
@@ -149,7 +145,7 @@ async def run_consensus(
             coder_system_extra = ctx.system
             rag_sources = ctx.rag_sources or rag_sources
             if ctx.rag_sources and not context:
-                context = _rag_context_text(ctx.rag_sources)
+                context = rag_context_text(ctx.rag_sources)
 
         # 1. Code (team manifest may pin the coder model; otherwise quota decides).
         # With declared tools, an MCP manager stays open for the coder call:

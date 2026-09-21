@@ -2,21 +2,20 @@
 
 Composes content in a stable prefix order to maximise provider cache hits:
   1. Skills (static, domain expertise - most stable)
-  2. Tool definitions (static per session)
-  3. RAG chunks (semi-static, keyed to the query)
-  4. Task / spec (volatile - always last)
+  2. RAG chunks (semi-static, keyed to the query)
+  3. Task / spec (volatile - always last)
 
 This order ensures the stable prefix is as long as possible, so the provider
-can serve the system + skills + tools segment from its prefix cache.
+can serve the system + skills segment from its prefix cache. MCP tool prompts
+are owned by the agent tool loop (agents.py), not by this builder.
 
 Usage:
     ctx = await build(
         spec="write an Ansible role for nginx",
         role=team.roles["coder"],
         rag_hits=[...],          # optional, from rag.search()
-        tool_definitions=[...],  # optional, from mcp_client.list_tools()
     )
-    # ctx.system  -> full system prompt (skills + tools injected)
+    # ctx.system  -> full system prompt (skills injected)
     # ctx.user    -> user message (RAG context + spec)
     # ctx.tokens_estimate -> rough char count
 """
@@ -26,6 +25,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
+from . import config
 from .roles import Role
 from .skills import load_skills
 
@@ -54,14 +54,9 @@ class AgentContext:
         return len(self.user) // 4
 
 
-def _format_tools(tool_defs: list[dict]) -> str:
-    """Format MCP tool definitions for injection into the system prompt."""
-    if not tool_defs:
-        return ""
-    lines = ["Available tools (call via JSON tool-use format):"]
-    for t in tool_defs:
-        lines.append(f"- {t['name']}: {t.get('description', '(no description)')}")
-    return "\n".join(lines)
+def rag_context_text(hits: list[dict]) -> str:
+    """Compact RAG text for the 'Internal context' block (single shared format)."""
+    return "\n\n".join(f"[{h['source']}]\n{h['content']}" for h in hits)
 
 
 def _format_rag(hits: list[dict]) -> str:
@@ -87,12 +82,11 @@ async def build(
     role: Role,
     base_system: str = "",
     rag_hits: list[dict] | None = None,
-    tool_definitions: list[dict] | None = None,
 ) -> AgentContext:
     """Build the agent context for a role + spec combination.
 
     Stable prefix order (for cache efficiency):
-      system = base_system + skills_block + tools_block
+      system = base_system + skills_block
       user   = rag_block + spec
 
     RAG is only fetched when role.rag_ns is set; callers may also pass
@@ -105,7 +99,7 @@ async def build(
         try:
             from . import rag
 
-            hits = await rag.search(spec, k=3)
+            hits = await rag.search(spec, k=config.RAG_TOP_K)
             log.debug(
                 "context builder: RAG retrieved %d chunk(s) for ns=%s", len(hits), role.rag_ns
             )
@@ -121,12 +115,8 @@ async def build(
         # compromised skill cannot pose as system-level instructions.
         skills_block = f'<untrusted source="skills">\n{skills_block}\n</untrusted>'
 
-    # Format tool definitions.
-    tools_block = _format_tools(tool_definitions or [])
-
     # Assemble system prompt (stable prefix first).
-    system_parts = [p for p in [base_system, skills_block, tools_block] if p]
-    system = "\n\n".join(system_parts)
+    system = "\n\n".join(p for p in [base_system, skills_block] if p)
 
     # Assemble user message (volatile content last).
     rag_block = _format_rag(hits)

@@ -25,16 +25,14 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class ToolRuntime:
-    """Executes MCP tools for an agent call.
+    """Executes MCP tools for an agent tool loop.
 
-    definitions feeds the "Available tools" system block (context.py format);
+    definitions feed the loop's "Available tools" system block;
     call(name, arguments) executes one tool and returns its text result.
     """
 
     definitions: list[dict] = field(default_factory=list)
     call: Callable[[str, dict], Awaitable[str]] | None = None
-    # Extra slot for tests/diagnostics (call log); never used by the loop.
-    meta: dict = field(default_factory=dict)
 
 
 async def _tool_loop(

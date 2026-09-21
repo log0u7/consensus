@@ -5,6 +5,18 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- Lean pass 2: removed the unused `tool_definitions` prompt path in the
+  context builder (the MCP tool loop owns tool prompting), the test-only
+  `providers.resolve()` and `ToolRuntime.meta`, `skills.list_available`
+  and `cache.clear/stats`; `MCPClientManager.list_tools()` now reuses
+  definitions captured at connect (no re-RPC); RAG context formatting is
+  shared by pipeline and topologies; the context builder honours
+  `RAG_TOP_K`.
+
 ## [0.5.0] - 2026-09-21
 
 ### Added

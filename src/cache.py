@@ -66,9 +66,6 @@ class CacheBackend(ABC):
     @abstractmethod
     def __len__(self) -> int: ...
 
-    @abstractmethod
-    def clear(self) -> None: ...
-
 
 # ---------------------------------------------------------------------------
 # Memory backend (LRU cap via OrderedDict)
@@ -95,9 +92,6 @@ class MemoryBackend(CacheBackend):
 
     def __len__(self) -> int:
         return len(self._data)
-
-    def clear(self) -> None:
-        self._data.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -128,10 +122,6 @@ class SQLiteBackend(CacheBackend):
     def __len__(self) -> int:
         (n,) = self._db.execute("SELECT count(*) FROM cache").fetchone()
         return int(n)
-
-    def clear(self) -> None:
-        self._db.execute("DELETE FROM cache")
-        self._db.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -168,11 +158,3 @@ def put(messages: list[dict], model: str, response: str) -> None:
 
 def size() -> int:
     return len(_backend)
-
-
-def clear() -> None:
-    _backend.clear()
-
-
-def stats() -> dict:
-    return {"backend": CACHE_BACKEND, "enabled": RESPONSE_CACHE, "entries": size()}

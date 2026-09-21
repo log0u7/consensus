@@ -10,14 +10,6 @@ from src.roles import Role
 # ---------------------------------------------------------------------------
 
 
-def test_list_available_includes_bundled():
-    available = skills_mod.list_available()
-    assert "coding" in available
-    assert "review" in available
-    assert "sre" in available
-    assert "pentest" in available
-
-
 def test_load_known_skill():
     content = skills_mod.load("coding")
     assert len(content) > 0
@@ -80,14 +72,6 @@ async def test_build_prefetched_rag_hits_win_over_rag_ns(monkeypatch):
     ctx = await build("spec", role, rag_hits=hits)
     assert ctx.rag_sources == hits
     assert "prefetched" in ctx.user
-
-
-@pytest.mark.asyncio
-async def test_build_with_tools():
-    role = Role(name="coder", model="zen/deepseek-v3-0324")
-    tools = [{"name": "read_file", "description": "Read a file", "input_schema": {}}]
-    ctx = await build("spec", role, tool_definitions=tools)
-    assert "read_file" in ctx.system
 
 
 @pytest.mark.asyncio

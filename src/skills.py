@@ -45,10 +45,3 @@ def load_skills(names: list[str]) -> str:
         if content:
             parts.append(f"## Skill: {name}\n\n{content.strip()}")
     return "\n\n".join(parts)
-
-
-def list_available() -> list[str]:
-    """Return names of all available skills."""
-    if not _SKILLS_DIR.exists():
-        return []
-    return sorted(p.parent.name for p in _SKILLS_DIR.glob("*/SKILL.md"))

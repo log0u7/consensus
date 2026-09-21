@@ -7,10 +7,10 @@ config.py owns the env-driven Provider objects; providers.py owns the
 resolution logic and capability annotations.
 
 Usage:
-    from src.providers import resolve, has_reasoning
+    from src.providers import resolve_name
 
-    provider, model = resolve("zen/deepseek-r1-0528")
-    # provider is a config.Provider; model is "deepseek-r1-0528"
+    name, model = resolve_name("zen/deepseek-r1-0528")
+    # name is the provider name ("zen"), model is "deepseek-r1-0528"
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ from __future__ import annotations
 import logging
 
 from . import config
-from .config import Provider
 
 log = logging.getLogger(__name__)
 
@@ -67,18 +66,12 @@ def has_reasoning(provider_name: str, model: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def resolve(ref: str) -> tuple[Provider, str]:
-    """Resolve a 'provider/model' reference to (Provider, model_id).
+def resolve_name(ref: str) -> tuple[str, str]:
+    """Resolve a 'provider/model' reference to (provider_name, model).
 
     Raises KeyError (via config.get_provider) if the provider is not
     configured, with a clear error message pointing to the missing key.
     """
-    provider_name, model = resolve_name(ref)
-    return config.get_provider(provider_name), model
-
-
-def resolve_name(ref: str) -> tuple[str, str]:
-    """Resolve a 'provider/model' reference to (provider_name, model)."""
     if "/" not in ref:
         raise ValueError(f"Invalid model reference {ref!r}: expected 'provider/model-id'.")
     provider_name, model = ref.split("/", 1)

@@ -12,23 +12,23 @@ import pytest
 from src.agents import ToolRuntime, _tool_loop
 
 
-def _runtime(responses: dict[str, str]) -> ToolRuntime:
+def _runtime(responses: dict[str, str]) -> tuple[ToolRuntime, list[tuple[str, dict]]]:
     calls: list[tuple[str, dict]] = []
 
     async def _call(name: str, arguments: dict) -> str:
         calls.append((name, arguments))
         return responses[name]
 
-    return ToolRuntime(
+    runtime = ToolRuntime(
         definitions=[{"name": "read_file", "description": "Read a file", "input_schema": {}}],
         call=_call,
-        meta={"calls": calls},
     )
+    return runtime, calls
 
 
 @pytest.mark.asyncio
 async def test_tool_loop_calls_tool_then_final_answer(monkeypatch):
-    rt = _runtime({"read_file": "file contents here"})
+    rt, calls = _runtime({"read_file": "file contents here"})
     history = [{"role": "user", "content": "read main.py"}]
     rounds: list[list] = []
 
@@ -43,7 +43,7 @@ async def test_tool_loop_calls_tool_then_final_answer(monkeypatch):
 
     result = await _tool_loop("zen", "m", rt, history=history)
     assert result == "The file says: file contents here"
-    assert rt.meta["calls"] == [("read_file", {"path": "main.py"})]
+    assert calls == [("read_file", {"path": "main.py"})]
     # Round 2 must carry the assistant tool request and the tool result.
     round2 = rounds[1]
     assert any(m["role"] == "tool" and "file contents here" in m["content"] for m in round2)
@@ -51,7 +51,7 @@ async def test_tool_loop_calls_tool_then_final_answer(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_tool_loop_max_rounds_exhausted(monkeypatch):
-    rt = _runtime({"read_file": "x"})
+    rt, calls = _runtime({"read_file": "x"})
 
     async def fake_history(prov, model, messages, max_tokens=4096):
         return json.dumps({"tool": "read_file", "arguments": {}})
@@ -64,7 +64,7 @@ async def test_tool_loop_max_rounds_exhausted(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_tool_loop_system_prepended(monkeypatch):
-    rt = _runtime({})
+    rt, calls = _runtime({})
     seen: list[list] = []
 
     async def fake_history(prov, model, messages, max_tokens=4096):
@@ -86,7 +86,7 @@ async def test_tool_loop_system_prepended(monkeypatch):
 @pytest.mark.asyncio
 async def test_tool_loop_non_json_answer_ends_loop(monkeypatch):
     """A plain-text answer (not a tool call) is returned as final."""
-    rt = _runtime({})
+    rt, calls = _runtime({})
 
     async def fake_history(prov, model, messages, max_tokens=4096):
         return "just text, no json"
@@ -94,7 +94,7 @@ async def test_tool_loop_non_json_answer_ends_loop(monkeypatch):
     monkeypatch.setattr("src.agents.llm.complete_history", fake_history)
     result = await _tool_loop("zen", "m", rt, "", [{"role": "user", "content": "hi"}])
     assert result == "just text, no json"
-    assert rt.meta["calls"] == []
+    assert calls == []
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +107,7 @@ async def test_write_code_with_tools(monkeypatch):
     """write_code(tools=...) runs the tool loop, then parses the final JSON."""
     from src import agents
 
-    rt = _runtime({"read_file": "DATA"})
+    rt, calls = _runtime({"read_file": "DATA"})
 
     async def fake_history(prov, model, messages, max_tokens=4096):
         if len([m for m in messages if m["role"] == "tool"]) == 0:
@@ -123,14 +123,14 @@ async def test_write_code_with_tools(monkeypatch):
         tools=rt,
     )
     assert result["code"] == "print(1)"
-    assert len(rt.meta["calls"]) == 1
+    assert len(calls) == 1
 
 
 @pytest.mark.asyncio
 async def test_governed_call_with_tools(monkeypatch):
     from src import agents
 
-    rt = _runtime({"t": "ok"})
+    rt, calls = _runtime({"t": "ok"})
 
     async def fake_history(prov, model, messages, max_tokens=4096):
         return "final text answer"

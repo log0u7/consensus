@@ -1,29 +1,29 @@
 """Tests for src/providers.py registry."""
 
 import pytest
-from src import providers
-
-
-def test_resolve_valid():
-    prov, model = providers.resolve("zen/deepseek-v3-0324")
-    assert prov.name == "zen"
-    assert model == "deepseek-v3-0324"
+from src import config, providers
 
 
 def test_resolve_name_valid():
-    pname, model = providers.resolve_name("zen/qwen3-coder")
+    pname, model = providers.resolve_name("zen/deepseek-v3-0324")
     assert pname == "zen"
+    assert model == "deepseek-v3-0324"
+
+
+def test_resolve_name_validates_provider_configured():
+    pname, model = providers.resolve_name("zen/qwen3-coder")
+    assert config.get_provider(pname).name == pname
     assert model == "qwen3-coder"
 
 
 def test_resolve_missing_slash_raises():
     with pytest.raises(ValueError, match="provider/model-id"):
-        providers.resolve("justmodel")
+        providers.resolve_name("justmodel")
 
 
 def test_resolve_unknown_provider_raises():
     with pytest.raises(KeyError, match="not configured"):
-        providers.resolve("unknown_xyz/some-model")
+        providers.resolve_name("unknown_xyz/some-model")
 
 
 def test_caps_known_model():

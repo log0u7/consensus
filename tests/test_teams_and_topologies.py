@@ -725,7 +725,7 @@ async def test_pipeline_topology_injects_skills(monkeypatch):
     captured: dict = {}
 
     async def fake_governed_call(
-        provider, model, user, system=None, max_tokens=8000, fallback=None
+        provider, model, user, system=None, max_tokens=8000, fallback=None, tools=None
     ):
         captured.setdefault("systems", []).append(system)
         captured.setdefault("fallbacks", []).append(fallback)
@@ -766,3 +766,243 @@ def test_panel_members_resolve_through_providers(monkeypatch):
     members = topologies._panel_members(role)
     assert seen == ["zen/qwen3-coder"]
     assert members[0]["provider"] == "zen"
+
+
+# ---------------------------------------------------------------------------
+# MCP tools wiring: team-level mcp_servers + role.tools (server names)
+# ---------------------------------------------------------------------------
+
+
+def test_mcp_servers_parsed_from_manifest(tmp_path, monkeypatch):
+    """Team-level mcp_servers list is parsed into Team.mcp_servers."""
+    manifest = tmp_path / "mcp-team.yaml"
+    manifest.write_text(
+        """
+topology: consensus
+mcp_servers:
+  - name: serena
+    transport: stdio
+    command: ["uvx", "serena"]
+  - name: remote
+    transport: http
+    url: https://tools.example.com/mcp
+roles:
+  coder:
+    model: zen/deepseek-v3-0324
+  reviewer:
+    members:
+      - name: rv1
+        model: zen/qwen3-coder
+  consensus:
+    model: zen/deepseek-v3-0324
+  lead:
+    model: zen/deepseek-v3-0324
+"""
+    )
+    monkeypatch.setattr(roles_mod, "_TEAMS_DIR", tmp_path)
+    team = roles_mod.load("mcp-team")
+    assert len(team.mcp_servers) == 2
+    assert team.mcp_servers[0]["name"] == "serena"
+    assert team.mcp_servers[1]["transport"] == "http"
+
+
+def test_mcp_servers_default_empty(tmp_path, monkeypatch):
+    manifest = tmp_path / "plain.yaml"
+    manifest.write_text(
+        """
+topology: consensus
+roles:
+  coder:
+    model: zen/deepseek-v3-0324
+"""
+    )
+    monkeypatch.setattr(roles_mod, "_TEAMS_DIR", tmp_path)
+    team = roles_mod.load("plain")
+    assert team.mcp_servers == []
+
+
+def test_role_servers_resolved_from_names(tmp_path, monkeypatch):
+    """role.tools holds server NAMES; a role helper resolves them to configs."""
+    from src.topologies import role_servers
+
+    manifest = tmp_path / "mcp-role.yaml"
+    manifest.write_text(
+        """
+topology: consensus
+mcp_servers:
+  - name: serena
+    transport: stdio
+    command: ["uvx", "serena"]
+  - name: other
+    transport: stdio
+    command: ["echo"]
+roles:
+  coder:
+    model: zen/deepseek-v3-0324
+    tools: [serena]
+"""
+    )
+    monkeypatch.setattr(roles_mod, "_TEAMS_DIR", tmp_path)
+    team = roles_mod.load("mcp-role")
+    role = team.roles["coder"]
+
+    servers = role_servers(team, role)
+    assert [s["name"] for s in servers] == ["serena"]
+
+
+def test_role_servers_empty_when_no_tools(tmp_path, monkeypatch):
+    from src.topologies import role_servers
+
+    team = roles_mod.load("consensus")
+    assert role_servers(team, team.roles["coder"]) == []
+
+
+def test_role_tools_without_servers_get_no_runtime(tmp_path, monkeypatch):
+    """role.tools referencing servers absent from mcp_servers -> no runtime."""
+    from src.topologies import _runtime_for_role
+
+    manifest = tmp_path / "orphan.yaml"
+    manifest.write_text(
+        """
+topology: consensus
+roles:
+  coder:
+    model: zen/deepseek-v3-0324
+    tools: [ghost]
+"""
+    )
+    monkeypatch.setattr(roles_mod, "_TEAMS_DIR", tmp_path)
+    team = roles_mod.load("orphan")
+    assert _runtime_for_role(team, team.roles["coder"]) is None
+
+
+@pytest.mark.asyncio
+async def test_tools_reach_coder_through_mcp_manager(monkeypatch, tmp_path):
+    """End-to-end: role.tools + team.mcp_servers -> MCPClientManager started,
+    definitions in the coder system prompt, tool callable in write_code."""
+    from src import agents, mcp_client, topologies
+
+    manifest = tmp_path / "mcp-e2e.yaml"
+    manifest.write_text(
+        """
+topology: consensus
+mcp_servers:
+  - name: fake
+    transport: stdio
+    command: ["true"]
+roles:
+  coder:
+    model: zen/deepseek-v3-0324
+    tools: [fake]
+  reviewer:
+    members:
+      - name: rv1
+        model: zen/qwen3-coder
+  consensus:
+    model: zen/deepseek-v3-0324
+  lead:
+    model: zen/deepseek-v3-0324
+"""
+    )
+    monkeypatch.setattr(roles_mod, "_TEAMS_DIR", tmp_path)
+
+    started: list[list[dict]] = []
+
+    class FakeManager:
+        def __init__(self, servers):
+            started.append(servers)
+            self.servers = servers
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def list_tools(self):
+            return [{"name": "fake_tool", "description": "does fake things", "input_schema": {}}]
+
+        async def call_tool(self, name, arguments):
+            return f"ran {name}"
+
+    monkeypatch.setattr(mcp_client, "MCPClientManager", FakeManager)
+    monkeypatch.setattr(topologies, "MCPClientManager", FakeManager)
+
+    captured: dict = {}
+
+    async def fake_write_code(
+        spec,
+        context="",
+        provider=None,
+        model=None,
+        system_extra="",
+        fallback=None,
+        tools=None,
+        **kw,
+    ):
+        captured["tools"] = tools
+        return {"language": "python", "code": "x=1", "notes": "", "files": []}
+
+    async def fake_review(member, code, **kw):
+        from src.models import Review
+
+        return Review(reviewer=member["name"], ok=True, issues=[])
+
+    async def fake_consensus(reviews, **kw):
+        from src.models import ConsensusReport
+
+        return ConsensusReport(panel=[r.reviewer for r in reviews], summary="ok")
+
+    async def fake_verdict(spec, code, cj, **kw):
+        return {"verdict": "APPROVE", "rationale": "ok", "final_code": code, "files": []}
+
+    monkeypatch.setattr(agents, "write_code", fake_write_code)
+    monkeypatch.setattr(agents, "review_code", fake_review)
+    monkeypatch.setattr(agents, "build_consensus", fake_consensus)
+    monkeypatch.setattr(agents, "lead_verdict", fake_verdict)
+
+    team = roles_mod.load("mcp-e2e")
+    gen = await topologies.run(team, "spec", run_id="mcp-e2e")
+    [e async for e in gen]
+
+    tools = captured["tools"]
+    assert [t["name"] for t in tools.definitions] == ["fake_tool"]
+    assert await tools.call("fake_tool", {}) == "ran fake_tool"
+    assert started and started[0][0]["name"] == "fake"
+
+
+@pytest.mark.asyncio
+async def test_no_tools_no_manager(monkeypatch):
+    """No role declares tools -> MCPClientManager never instantiated."""
+    from src import agents, mcp_client, topologies
+
+    def boom(*a, **kw):
+        raise AssertionError("MCPClientManager must not be instantiated")
+
+    monkeypatch.setattr(mcp_client, "MCPClientManager", boom)
+    monkeypatch.setattr(topologies, "MCPClientManager", boom)
+
+    async def fake_write_code(spec, context="", provider=None, model=None, **kw):
+        return {"language": "python", "code": "x=1", "notes": "", "files": []}
+
+    async def fake_review(member, code, **kw):
+        from src.models import Review
+
+        return Review(reviewer=member["name"], ok=True, issues=[])
+
+    async def fake_consensus(reviews, **kw):
+        from src.models import ConsensusReport
+
+        return ConsensusReport(panel=[r.reviewer for r in reviews], summary="ok")
+
+    async def fake_verdict(spec, code, cj, **kw):
+        return {"verdict": "APPROVE", "rationale": "ok", "final_code": code, "files": []}
+
+    monkeypatch.setattr(agents, "write_code", fake_write_code)
+    monkeypatch.setattr(agents, "review_code", fake_review)
+    monkeypatch.setattr(agents, "build_consensus", fake_consensus)
+    monkeypatch.setattr(agents, "lead_verdict", fake_verdict)
+
+    team = roles_mod.load("consensus")
+    topo = await topologies.run(team, "spec", run_id="nomanager")
+    [e async for e in topo]  # must not raise

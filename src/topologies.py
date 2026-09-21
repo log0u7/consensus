@@ -22,7 +22,9 @@ from collections.abc import AsyncIterator, Callable
 
 from . import agents, config, llm, pricing, providers, quota
 from . import sandbox as sandbox_mod
+from .agents import ToolRuntime
 from .context import build as build_context
+from .mcp_client import MCPClientManager
 from .models import ConsensusReport, PipelineResult, SandboxResult, summarize_usage
 from .roles import Role, Team
 
@@ -64,6 +66,52 @@ def _panel_members(reviewer_role: Role) -> list[dict]:
     return quota.panel()
 
 
+def role_servers(team: Team, role: Role) -> list[dict]:
+    """Resolve a role's tool references (server NAMES) to MCP server configs.
+
+    role.tools holds server names defined in team.mcp_servers; unknown names
+    are logged and skipped (resilient by default, like all team plumbing).
+    """
+    if not role.tools:
+        return []
+    by_name = {s.get("name"): s for s in team.mcp_servers}
+    out = []
+    for name in role.tools:
+        cfg = by_name.get(name)
+        if cfg is None:
+            log.warning(
+                "role %r references MCP server %r not defined in team %r mcp_servers",
+                role.name,
+                name,
+                team.name,
+            )
+            continue
+        out.append(cfg)
+    return out
+
+
+def _runtime_for_role(team: Team, role: Role) -> ToolRuntime | None:
+    """Build a ToolRuntime for a role when it references MCP servers.
+
+    Returns None when the role declares no tools or none resolve to a
+    configured server (MCPClientManager is then never instantiated, so the
+    mcp SDK is never imported without tools).
+
+    ponytail: one MCPClientManager per tool call (connect/call/close) instead
+    of a run-scoped manager; if session startup dominates latency, hold one
+    manager open for the topology run instead.
+    """
+    servers = role_servers(team, role)
+    if not servers:
+        return None
+
+    async def call(name: str, arguments: dict) -> str:
+        async with MCPClientManager(servers) as mgr:
+            return await mgr.call_tool(name, arguments)
+
+    return ToolRuntime(definitions=[], call=call)
+
+
 # ---------------------------------------------------------------------------
 # Topology: consensus  (coder -> panel -> consensus -> lead)
 # ---------------------------------------------------------------------------
@@ -103,22 +151,40 @@ async def run_consensus(
             if ctx.rag_sources and not context:
                 context = _rag_context_text(ctx.rag_sources)
 
-        # 1. Code (team manifest may pin the coder model; otherwise quota decides)
+        # 1. Code (team manifest may pin the coder model; otherwise quota decides).
+        # With declared tools, an MCP manager stays open for the coder call:
+        # definitions are listed once (system prompt) and call_tool is bound.
         coder_fallback = coder_role.fallback or None if coder_role else None
-        if coder_role and coder_role.model:
-            prov, mod = providers.resolve_name(coder_role.model)
-            coded = await agents.write_code(
-                spec,
-                context,
-                provider=prov,
-                model=mod,
-                system_extra=coder_system_extra,
-                fallback=coder_fallback,
-            )
-        else:
-            coded = await agents.write_code(
-                spec, context, system_extra=coder_system_extra, fallback=coder_fallback
-            )
+        coder_servers = role_servers(team, coder_role) if coder_role else []
+        coder_runtime: ToolRuntime | None = None
+        mgr: MCPClientManager | None = None
+        if coder_servers:
+            mgr = MCPClientManager(coder_servers)
+            await mgr.__aenter__()
+            coder_runtime = ToolRuntime(definitions=await mgr.list_tools(), call=mgr.call_tool)
+        try:
+            if coder_role and coder_role.model:
+                prov, mod = providers.resolve_name(coder_role.model)
+                coded = await agents.write_code(
+                    spec,
+                    context,
+                    provider=prov,
+                    model=mod,
+                    system_extra=coder_system_extra,
+                    fallback=coder_fallback,
+                    tools=coder_runtime,
+                )
+            else:
+                coded = await agents.write_code(
+                    spec,
+                    context,
+                    system_extra=coder_system_extra,
+                    fallback=coder_fallback,
+                    tools=coder_runtime,
+                )
+        finally:
+            if mgr is not None:
+                await mgr.__aexit__(None, None, None)
         code = coded["code"]
         rlog("info", "coder done (%.1fs)", time.perf_counter() - t0)
         # Panel members resolved BEFORE the code event so the UI knows the
@@ -312,6 +378,7 @@ async def run_pipeline(
             prov, mod = (
                 providers.resolve_name(role.model) if "/" in role.model else quota.coder_model()
             )
+            rt = _runtime_for_role(team, role)
             tok = llm.set_step(role_name)
             try:
                 output = await agents.governed_call(
@@ -321,6 +388,7 @@ async def run_pipeline(
                     system=system_extra or None,
                     max_tokens=role.max_tokens or config.CODER_MAX_TOKENS,
                     fallback=role.fallback or None,
+                    tools=rt,
                 )
             finally:
                 llm.reset_step(tok)
@@ -397,6 +465,7 @@ async def run_loop(
                 prov, mod = (
                     providers.resolve_name(role.model) if "/" in role.model else quota.coder_model()
                 )
+                rt = _runtime_for_role(team, role)
                 tok = llm.set_step(f"{role_name}:{i}")
                 try:
                     output = await agents.governed_call(
@@ -406,6 +475,7 @@ async def run_loop(
                         system=system_extra or None,
                         max_tokens=role.max_tokens or config.CODER_MAX_TOKENS,
                         fallback=role.fallback or None,
+                        tools=rt,
                     )
                 finally:
                     llm.reset_step(tok)

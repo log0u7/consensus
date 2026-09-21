@@ -67,6 +67,9 @@ class Team:
     topology: str  # "consensus" | "pipeline" | "loop"
     roles: dict[str, Role]
     sandbox: bool = False  # team-level sandbox default
+    # MCP server configs (see mcp_client.py): {name, transport, command|url}.
+    # Roles reference servers by NAME via Role.tools.
+    mcp_servers: list[dict] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +127,13 @@ def load(team_name: str) -> Team:
         role_name: _role_from_dict(role_name, role_data, team_sandbox)
         for role_name, role_data in roles_raw.items()
     }
-    return Team(name=team_name, topology=topology, roles=roles, sandbox=team_sandbox)
+    return Team(
+        name=team_name,
+        topology=topology,
+        roles=roles,
+        sandbox=team_sandbox,
+        mcp_servers=list(raw.get("mcp_servers", []) or []),
+    )
 
 
 def list_teams() -> list[str]:

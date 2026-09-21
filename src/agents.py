@@ -7,6 +7,7 @@ recovers it with repair and retry.
 
 import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 
 from pydantic import ValidationError
 
@@ -20,6 +21,79 @@ from .models import (
 )
 
 log = logging.getLogger(__name__)
+
+
+@dataclass
+class ToolRuntime:
+    """Executes MCP tools for an agent call.
+
+    definitions feeds the "Available tools" system block (context.py format);
+    call(name, arguments) executes one tool and returns its text result.
+    """
+
+    definitions: list[dict] = field(default_factory=list)
+    call: Callable[[str, dict], Awaitable[str]] | None = None
+    # Extra slot for tests/diagnostics (call log); never used by the loop.
+    meta: dict = field(default_factory=dict)
+
+
+async def _tool_loop(
+    provider: str,
+    model: str,
+    tools: ToolRuntime,
+    system: str = "",
+    history: list[dict[str, str]] | None = None,
+    max_tokens: int = 4096,
+    max_rounds: int | None = None,
+) -> str:
+    """Agentic loop: let the model call MCP tools, then answer.
+
+    Each round asks the model for either a tool request
+    ({"tool": name, "arguments": {...}}) or its final answer. Tool requests
+    are executed via tools.call, the result is appended as a "tool" message,
+    and the model is re-prompted. A non-tool answer ends the loop.
+    Raises ValueError when max_rounds tool rounds are exhausted without a
+    final answer (runaway-loop guard, MCP_MAX_ROUNDS by default).
+    """
+    if max_rounds is None:
+        max_rounds = config.MCP_MAX_ROUNDS
+    messages = _with_system(
+        "\n\n".join(p for p in [system, _format_tool_system(tools)] if p),
+        list(history or []),
+    )
+    for _ in range(max_rounds + 1):
+        answer = await llm.complete_history(provider, model, messages, max_tokens)
+        parsed = llm.parse_json(answer)
+        if not (isinstance(parsed, dict) and "tool" in parsed):
+            return answer
+        name = str(parsed.get("tool", ""))
+        arguments = parsed.get("arguments") or {}
+        if not isinstance(arguments, dict) or tools.call is None or not name:
+            raise ValueError(f"invalid tool request from model: {answer[:200]}")
+        log.info("tool call: %s", name)
+        try:
+            result = await tools.call(name, arguments)
+        except Exception as exc:  # noqa: BLE001 - tool failure is data for the model
+            result = f"TOOL ERROR: {type(exc).__name__}: {exc}"
+        messages = [
+            *messages,
+            {"role": "assistant", "content": answer},
+            {"role": "tool", "content": f"[{name} result]\n{result}"},
+        ]
+    raise ValueError(
+        f"MCP tool loop exhausted max rounds ({max_rounds}); the model kept requesting tools"
+    )
+
+
+def _format_tool_system(tools: ToolRuntime) -> str:
+    lines = ['Available tools (request one with {"tool": name, "arguments": {...}}):']
+    for t in tools.definitions:
+        lines.append(f"- {t['name']}: {t.get('description', '(no description)')}")
+    return "\n".join(lines)
+
+
+def _format_tool_system_wrapped(tools: ToolRuntime) -> str:
+    return '<untrusted source="tools">\n' + _format_tool_system(tools) + "\n</untrusted>"
 
 
 def context_stats(system: str, user: str, provider: str, model: str) -> dict:
@@ -63,12 +137,24 @@ async def governed_call(
     system: str | None = None,
     max_tokens: int = 4096,
     fallback: list[str] | None = None,
+    tools: ToolRuntime | None = None,
 ) -> str:
     """One LLM call routed through the governor (rate-limit + retry + fallback).
 
     Single source of truth for topology role steps; agents must never call
-    llm.complete() directly.
+    llm.complete() directly. With tools, runs the MCP tool loop instead of a
+    single completion (rate-limited via governor.rpm on the primary provider).
     """
+    if tools is not None and (tools.definitions or tools.call is not None):
+        async with governor.rpm(provider):
+            return await _tool_loop(
+                provider,
+                model,
+                tools,
+                system or "",
+                [{"role": "user", "content": user}],
+                max_tokens=max_tokens,
+            )
     return await _governed(
         provider,
         lambda prov: llm.complete(prov, model, user, system=system, max_tokens=max_tokens),
@@ -136,27 +222,44 @@ async def write_code(
     model: str | None = None,
     system_extra: str = "",
     fallback: list[str] | None = None,
+    tools: ToolRuntime | None = None,
 ) -> dict:
     """Coder step. provider/model override the quota profile (team manifest);
     when either is missing the quota profile decides. system_extra extends the
-    system prompt (declared skills/tools); fallback overrides CODER_FALLBACK."""
+    system prompt (declared skills); fallback overrides CODER_FALLBACK.
+    With tools, runs the MCP tool loop first; its final answer must still be
+    the strict JSON the coder contract requires."""
     user = spec if not context else f"Internal context:\n{context}\n\nTask:\n{spec}"
     if provider is None or model is None:
         provider, model = quota.coder_model()
     system = f"{_CODER_SYS}\n\n{system_extra}" if system_extra else _CODER_SYS
     tok = llm.set_step("coder")
     try:
-        data = await _governed_json(
-            provider,
-            lambda prov, attempt: llm.complete(
-                prov,
-                model,
-                user + (llm._JSON_RETRY_HINT if attempt else ""),
-                system,
-                max_tokens=config.CODER_MAX_TOKENS,
-            ),
-            fallback if fallback is not None else config.CODER_FALLBACK,
-        )
+        if tools is not None and (tools.definitions or tools.call is not None):
+            async with governor.rpm(provider):
+                final = await _tool_loop(
+                    provider,
+                    model,
+                    tools,
+                    system,
+                    [{"role": "user", "content": user}],
+                    max_tokens=config.CODER_MAX_TOKENS,
+                )
+            data = llm.parse_json(final)
+            if not isinstance(data, dict):
+                raise ValueError(f"coder final answer is not JSON: {final[:200]}")
+        else:
+            data = await _governed_json(
+                provider,
+                lambda prov, attempt: llm.complete(
+                    prov,
+                    model,
+                    user + (llm._JSON_RETRY_HINT if attempt else ""),
+                    system,
+                    max_tokens=config.CODER_MAX_TOKENS,
+                ),
+                fallback if fallback is not None else config.CODER_FALLBACK,
+            )
     finally:
         llm.reset_step(tok)
     files = _parse_files(data.get("files"))

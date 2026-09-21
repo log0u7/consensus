@@ -388,3 +388,7 @@ RAG_BACKEND = os.environ.get("RAG_BACKEND", "pgvector")  # "pgvector" | "sqlite"
 
 PG_DSN = os.environ.get("PG_DSN", "")
 SQLITE_VEC_PATH = os.environ.get("SQLITE_VEC_PATH", "rag.db")
+
+# MCP tool loop: max tool-request rounds before the run fails loud.
+# Guards against a model that keeps requesting tools without answering.
+MCP_MAX_ROUNDS = int(os.environ.get("MCP_MAX_ROUNDS", "5"))

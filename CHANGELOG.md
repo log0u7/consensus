@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   required fields; blank issues disabled. Pull request template and a
   `PR hygiene` CI job enforcing Conventional Commits titles and branch
   naming.
+- **MCP tools wired with an agentic tool loop**: team manifests can declare
+  `mcp_servers` (stdio or Streamable HTTP) and roles reference them by name
+  via `tools:`. Declared roles run a tool loop - definitions injected into
+  the system prompt, `{"tool": name, "arguments": {...}}` requests executed
+  via `MCPClientManager.call_tool`, results fed back until the model produces
+  its final answer (`MCP_MAX_ROUNDS=5` guard; tool failures become data, not
+  crashes; arguments never logged). Without `tools:` the MCP SDK is never
+  imported.
 - **Declarative layer wired**: production topologies now call
   `context.build()`; `skills:` and `rag_ns:` declared in `teams/*.yaml`
   reach the prompts (skills in the stable system prefix, role-level RAG

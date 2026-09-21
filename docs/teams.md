@@ -13,14 +13,25 @@ to add a new domain.
 topology: consensus        # consensus | pipeline | loop (required)
 sandbox: false             # default sandbox flag for the whole team
 
+mcp_servers:               # optional team-level MCP server configs
+  - name: serena           # role.tools references servers by NAME
+    transport: stdio       # stdio | http
+    command: ["uvx", "--from", "git+https://github.com/oraios/serena",
+              "serena", "start-mcp-server", "--context", "ide-assistant",
+              "--project", "."]
+  - name: remote-tools
+    transport: http        # https required for non-loopback hosts
+    url: https://tools.example.com/mcp
+
 roles:
   coder:                   # role name (arbitrary, topology-specific)
     model: zen/deepseek-v3-0324   # "provider/model-id" (required)
     fallback: []           # list of fallback providers tried in order
+                           # (overrides CODER_FALLBACK env; empty = env wins)
     max_tokens: 8000       # LLM budget for this role
     skills: [coding]       # list of skill names (loads skills/<name>/SKILL.md)
-    tools: []              # retrieval primitive names (reserved, not wired yet)
-    rag_ns: ""             # RAG namespace tag (declared, not wired yet)
+    tools: [serena]        # MCP server names (see mcp_servers above)
+    rag_ns: ""             # RAG namespace; set to fetch chunks for this role
     sandbox: false         # per-role override
 
   reviewer:                # panel role: may have 'members' instead of a single model
@@ -37,11 +48,15 @@ roles:
 All fields except `model` are optional. Unset fields fall back to sane defaults
 defined in `src/config.py`.
 
-> **Declarative layer status**: `skills`, `tools`, and `rag_ns` are parsed and
-> validated, but the production topologies do not call `context.build()` yet.
-> They are reserved for the upcoming zero-token retrieval executor (Cerebras
-> pattern). The only active RAG path today is the global `use_rag` flag
-> (see `docs/rag.md`).
+> **Declarative layer**: `skills`, `fallback`, and `rag_ns` are fully wired in
+> all three topologies via `context.build()` - skills land in the stable
+> system prefix (cache-friendly), a role's `rag_ns` fetches chunks into its
+> prompt (the global `use_rag` flag still pre-fetches when set, see
+> `docs/rag.md`), and a role's `fallback` overrides the env-driven provider
+> fallback list. `tools:` runs MCP servers (see above) through an agentic
+> tool loop: the model requests tools with `{"tool": name, "arguments": {...}}`,
+> results are fed back, and it must still produce the final structured answer.
+> `MCP_MAX_ROUNDS` (default 5) bounds the loop.
 
 ## The three topologies
 

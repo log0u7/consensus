@@ -22,8 +22,7 @@ YAML schema (teams/<name>.yaml):
       sandbox: false        # run code after generation?
     reviewer:
       model: zen/qwen3-coder
-      fanout: 3             # how many reviewer instances to spawn
-      members:              # explicit member list (overrides fanout)
+      members:              # explicit member list (overrides REVIEW_PANEL)
         - name: deepseek-coder
           model: zen/deepseek-v3-0324
         - name: qwen3-coder

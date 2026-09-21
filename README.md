@@ -226,13 +226,37 @@ The `mcp` SDK is a soft dependency - only needed when tools are listed in a team
 pip install mcp
 ```
 
+Declare servers at team level and reference them by NAME from roles:
+
+```yaml
+mcp_servers:
+  - name: serena
+    transport: stdio
+    command: ["uvx", "--from", "git+https://github.com/oraios/serena",
+              "serena", "start-mcp-server", "--context", "ide-assistant",
+              "--project", "."]
+roles:
+  coder:
+    tools: [serena]
+```
+
+Roles that declare `tools` run through an agentic tool loop: tool definitions
+are injected into the system prompt, the model requests tools with
+`{"tool": name, "arguments": {...}}`, results are fed back into the
+conversation, and the model must still produce the final structured answer.
+`MCP_MAX_ROUNDS` (default 5) bounds the loop; tool failures are reported to
+the model as data instead of crashing the run. No team declares `tools:` ->
+the MCP SDK is never imported. Remote MCP endpoints must use https (plain
+http is accepted only for loopback hosts).
+
 **Serena (LSP)** - reduces token usage by providing symbolic code navigation
 instead of dumping whole files. Launch externally:
 ```
 uvx --from git+https://github.com/oraios/serena \
   serena start-mcp-server --context ide-assistant --project .
 ```
-Then list it under `tools:` in your team manifest.
+Then reference the `serena` server from a role: `tools: [serena]` (see the
+`mcp_servers` block above).
 
 ## Cache
 

@@ -19,3 +19,8 @@ docs-projet/*
 rag.db
 pricing.db
 .opencode/
+# mutmut scratch (mutation runs must use a flattened copy outside the repo:
+# mutmut 3 does not support the src.* test-import layout)
+mutants/
+.mutmut-cache
+.mutmut-cache.*

@@ -152,11 +152,13 @@ See `teams/sre.yaml` (pipeline) and `teams/pentest.yaml` (loop) as examples.
 
 Runtime:
 - `httpx` - HTTP transport (no LLM SDK by design).
-- `pydantic` + `pydantic-settings` - schemas and validation.
+- `pydantic` - schemas and validation.
 - `fastapi` + `uvicorn` - API and SSE.
 - `aiolimiter` + `tenacity` - rate-limit and retry in `governor.py`.
 - `json-repair` - JSON recovery fallback in `llm.py`.
 - `pyyaml` - team manifest loading.
+- `sqlite-vec` - sqlite RAG backend, only needed for `RAG_BACKEND=sqlite`
+  (pgvector is the default; no server required).
 - `psycopg[binary]` + `pgvector` - Postgres RAG backend (optional at runtime).
 - `py7zr` - 7z archive support.
 - `mcp` *(soft)* - MCP client SDK; only required when `tools:` are listed in a

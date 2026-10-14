@@ -1,7 +1,7 @@
 # Runtime dependencies. Exact pins (==) for supply-chain reproducibility;
 # bump deliberately, run `make check` and the CI security job after each bump.
 httpx==0.28.1
-textual==8.2.7
+textual==8.2.8
 fastapi==0.138.1
 uvicorn[standard]==0.54.0
 # Explicit pin: transitive via httpx/starlette; 4.14.1 has CVE-2026-64847/63349.

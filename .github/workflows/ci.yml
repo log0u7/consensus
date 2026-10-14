@@ -117,7 +117,7 @@ jobs:
         # Audits the installed environment (direct + transitive pins).
         run: pip-audit --strict
       - name: Secret scan (gitleaks)
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

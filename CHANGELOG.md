@@ -5,6 +5,13 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- CI: the PR hygiene check now accepts `dependabot/*` branch names, so bot-authored
+  dependency PRs are no longer hard-blocked by the branch-name convention.
+
 ## [0.6.0] - 2026-09-21
 
 ### Changed

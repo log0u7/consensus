@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [0.6.1] - 2026-10-14
 
+### Added
+
+- Repo policy files: issue templates (bug report / feature request), pull request
+  template, Dependabot config (weekly groups + 7-day cooldown), `CONTRIBUTING.md`,
+  `SECURITY.md`, `AGENTS.md`.
+
 ### Changed
 
 - Dependencies: `sqlite-vec` 0.1.9, `uvicorn` 0.54.0 (with its `[standard]`
@@ -278,7 +284,8 @@ and any OpenAI-compatible or Anthropic provider.
 - **Web UI** - single-page chat, syntax highlighting, quota pill.
 - **MIT licence**.
 
-[Unreleased]: https://github.com/log0u7/consensus/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/log0u7/consensus/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/log0u7/consensus/compare/v0.6.0...v0.6.1
 [0.4.0]: https://github.com/log0u7/consensus/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/log0u7/consensus/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/log0u7/consensus/compare/v0.1.0...v0.2.0

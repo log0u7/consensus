@@ -145,8 +145,8 @@ jobs:
             echo "::error::PR title must follow Conventional Commits (type(scope): description), got: \"$PR_TITLE\""
             exit 1
           fi
-          branch_re='^(feat|fix|docs|ci|chore)/.+'
+          branch_re='^(feat|fix|docs|ci|chore|dependabot)/.+'
           if ! grep -Pq "$branch_re" <<<"$HEAD_REF"; then
-            echo "::error::Branch must be feat/*, fix/*, docs/*, ci/* or chore/*, got: \"$HEAD_REF\""
+            echo "::error::Branch must be feat/*, fix/*, docs/*, ci/*, chore/* or dependabot/*, got: \"$HEAD_REF\""
             exit 1
           fi

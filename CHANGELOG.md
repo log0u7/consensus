@@ -5,10 +5,13 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.6.1] - 2026-10-14
 
-### Fixed
+### Changed
 
+- Dependencies: `sqlite-vec` 0.1.9, `uvicorn` 0.54.0 (with its `[standard]`
+  extras), `json-repair` 0.63.5, `textual` 8.2.8; dev: `ruff` 0.16.10;
+  CI: `gitleaks/gitleaks-action` 3 (six Dependabot PRs).
 - CI: the PR hygiene check now accepts `dependabot/*` branch names, so bot-authored
   dependency PRs are no longer hard-blocked by the branch-name convention.
 

@@ -13,17 +13,57 @@
 
 # Consensus
 
-Multi-agent orchestration running on any OpenAI-compatible or Anthropic provider.
+Multi-agent orchestration on any OpenAI-compatible or Anthropic provider.
+The default pipeline is multi-agent **code review**: a coder writes, a panel
+of independent models reviews in parallel, a consensus step scores each
+issue by agreement, and a lead arbitrates and produces the final code.
+
 Free by default on [Zen](https://opencode.ai) (no credit card required).
 
-Domains are declared as **team manifests** (`teams/*.yaml`). The default team
-performs multi-agent **code review**: a coder writes, a panel of independent
-models reviews in parallel, a consensus step scores each issue by agreement,
-and a lead arbitrates and produces the final code.
+Provider-agnostic by design: hosted (Zen, OpenRouter, OpenAI, Anthropic) or
+fully local (llama.cpp, Ollama, vLLM - any OpenAI-compatible server), with a
+different provider per role and local fallback when a hosted provider is down.
 
-Other built-in teams: **SRE/DevOps** (planner -> executor -> verifier) and
-**pentest/CTF** (recon -> exploit -> report loop). Adding a domain requires only
-a new YAML file - no application code changes.
+Domains are declared as **team manifests** (`teams/*.yaml`). Other built-in
+teams: **SRE/DevOps** (planner -> executor -> verifier) and **pentest/CTF**
+(recon -> exploit -> report loop). Adding a domain requires only a new YAML
+file - no application code changes.
+
+## Why consensus
+
+A single model grading its own output (or one other model) is the weakest
+link in LLM code review: one hallucinated issue or one missed bug, and you
+have no way to tell. Consensus replaces the single opinion with an
+independent panel and makes disagreement visible and scored.
+
+|              | Single model                 | Consensus panel                                       |
+|--------------|------------------------------|-------------------------------------------------------|
+| Review       | one model, one opinion       | N independent models review the same diff in parallel |
+| Disagreement | invisible                    | scored in code from the real panel output, clamped    |
+| Verdict      | full confidence, no context  | lead arbitrates with the agreement map in hand        |
+| Provider     | lock-in                      | any provider, mix per role, local fallback            |
+| Failure      | crash or silent garbage      | failing reviewer skipped, degraded verdict instead    |
+
+**Use it if** you want independent, agreement-scored review of generated
+code, want to mix models per role, or want everything local and free.
+**Not for** unattended long-horizon autonomy: roles are focused steps with
+structured outputs, and a human reads the lead's verdict.
+
+## Design principles
+
+Heavily inspired by [12-factor agents](https://github.com/humanlayer/12-factor-agents):
+
+- **No SDK, no agent framework**: plain `httpx` calls plus explicit
+  orchestrators, nothing hidden behind abstractions.
+- **Own your prompts and your context window**: prompts and the stable
+  prefix order (system -> skills -> tools -> RAG -> spec) live in
+  application code, built for prompt-cache hits.
+- **Own your control flow**: the `consensus`, `pipeline` and `loop`
+  topologies are explicit Python functions, not framework magic.
+- **Tools are just structured outputs**: MCP tools run through a JSON tool
+  loop; tool failures are fed back to the model as data, not raised.
+- **Degrade, never crash**: a failing reviewer is skipped, an unreachable
+  lead still produces a degraded verdict carrying the coder's code.
 
 ## Architecture
 
@@ -61,13 +101,13 @@ All LLM calls: httpx -> provider, routed through `governor.py`
 
 ## Providers
 
-| Name         | Transport          | Default base URL                          |
-|--------------|--------------------|-------------------------------------------|
-| `zen`        | OpenAI-compatible  | `https://opencode.ai/zen/v1` (free)       |
-| `openrouter` | OpenAI-compatible  | `https://openrouter.ai/api/v1`            |
-| `openai`     | OpenAI-compatible  | configurable `OPENAI_BASE_URL`            |
-| `anthropic`  | Anthropic Messages | `https://api.anthropic.com/v1`            |
-| `local`      | OpenAI-compatible  | `LOCAL_BASE_URL` (llama.cpp, Ollama, ...) |
+| Name         | Transport          | Default base URL                                    | Notes                          |
+|--------------|--------------------|-----------------------------------------------------|--------------------------------|
+| `zen`        | OpenAI-compatible  | `https://opencode.ai/zen/v1`                        | free tier, no credit card      |
+| `openrouter` | OpenAI-compatible  | `https://openrouter.ai/api/v1`                      | many `:free` models, real cost |
+| `openai`     | OpenAI-compatible  | `https://api.openai.com/v1` (`OPENAI_BASE_URL`)     |                                |
+| `anthropic`  | Anthropic Messages | `https://api.anthropic.com/v1`                      | native SSE streaming           |
+| `local`      | OpenAI-compatible  | `LOCAL_BASE_URL`                                    | llama.cpp, Ollama, vLLM...     |
 
 Models use the `provider/model-id` format: `zen/big-pickle`,
 `anthropic/claude-opus-latest`, `local/qwen3-8b`.
@@ -76,6 +116,15 @@ Costs and context windows are derived at runtime from OpenRouter's public
 catalog (cached in `pricing.db`); local models cost 0. Prompt caching is
 native: Anthropic gets `cache_control` on the system prefix, llama.cpp gets
 `cache_prompt`, and cached tokens are surfaced in the UI (`cached input`).
+
+### Fully local
+
+Point `LOCAL_BASE_URL` at any OpenAI-compatible server (llama.cpp server,
+default `http://127.0.0.1:8080`; Ollama on `:11434`; vLLM) and route roles
+to `local/<model>` refs. No API key needed, cost is always 0, prompt reuse
+is native (`cache_prompt`), and LLM traffic never leaves your machine.
+`make setup` configures it interactively, and `CODER_FALLBACK=local` uses
+it as an emergency fallback when a hosted provider is down.
 
 ## Quickstart
 
@@ -114,6 +163,16 @@ To run a task on the CLI instead of the UI:
 make run SPEC="Write a Python function that validates an email address"
 ```
 
+### No key, fully local
+
+One local server is enough, no provider key:
+```
+cp env.example .env
+# edit .env: LOCAL_BASE_URL=http://127.0.0.1:8080
+#            plus local/<model> refs for the roles (see env.example)
+make up
+```
+
 ### Free demo mode (zero cost)
 
 `make setup-auto` writes a complete, non-interactive **free-tier test
@@ -122,9 +181,9 @@ configuration**. All you need is one free OpenRouter key
 
 - imports keys already saved by opencode when present,
 - routes every role to free models: `cohere/north-mini-code:free` as coder,
-  `z-ai/glm-5.2:free` as consensus + lead, and a review panel of 3 distinct
-  free models with a 32k output budget each (reasoning models think before
-  answering),
+  `minimax/minimax-m3:free` as consensus, `z-ai/glm-5.2:free` as lead, and a
+  review panel of 3 distinct free models (minimax, glm, nemotron) with a
+  32k output budget each (reasoning models think before answering),
 - raises the 429 retry budget (free pools answer 429 in bursts),
 - generates the compose `PG_PASSWORD` and seeds the pricing catalog
   (`pricing.db`) so costs show up from the first run.
@@ -155,7 +214,7 @@ normal OpenRouter models - one vendor per role, no free-pool 429 noise:
 | coder     | `openai/gpt-5.4-mini`                       |
 | consensus | `google/gemini-3.5-flash-lite`              |
 | lead      | `openai/gpt-5.3-codex`                      |
-| panel     | `gemini-3.5-flash-lite`, `gpt-5.4-mini`, `deepseek-v4-flash-latest` |
+| panel     | `gemini-3.5-flash-lite`, `gpt-5.4-mini`, `deepseek-v4-flash` |
 
 Indicative cost per small test run: ~$0.03-0.10 (real costs show up in the
 UI and CLI summary). Requires a positive OpenRouter credit balance - the
@@ -180,10 +239,9 @@ Teams are YAML files in `teams/`. Three topologies are available:
 | `pipeline`  | role1 -> role2 -> role3 (sequential)  | `sre.yaml`       |
 | `loop`      | roles cycle until `[DONE]`            | `pentest.yaml`   |
 
-To use a non-default team via the CLI:
-```
-# (currently via pipeline.run directly; UI team selection coming in a future version)
-```
+To use a non-default team via the CLI: run `pipeline.run(spec,
+team_name=...)` directly in Python; API/UI team selection is a future
+version. See [docs/teams.md](docs/teams.md).
 
 ### Adding a domain
 
@@ -219,8 +277,9 @@ roles:
 
 ## MCP tools (optional)
 
-Tools are provided by MCP servers (Serena for LSP, custom infra tools, etc.).
-The `mcp` SDK is a soft dependency - only needed when tools are listed in a team.
+Tools are provided by MCP servers (Serena for LSP, Context7 for library
+docs, custom infra tools, ...). The `mcp` SDK is a soft dependency - only
+needed when tools are listed in a team.
 
 ```
 pip install mcp
@@ -235,9 +294,12 @@ mcp_servers:
     command: ["uvx", "--from", "git+https://github.com/oraios/serena",
               "serena", "start-mcp-server", "--context", "ide-assistant",
               "--project", "."]
+  - name: context7
+    transport: http
+    url: https://mcp.context7.com/mcp
 roles:
   coder:
-    tools: [serena]
+    tools: [serena, context7]
 ```
 
 Roles that declare `tools` run through an agentic tool loop: tool definitions
@@ -257,6 +319,11 @@ uvx --from git+https://github.com/oraios/serena \
 ```
 Then reference the `serena` server from a role: `tools: [serena]` (see the
 `mcp_servers` block above).
+
+**Context7 (library docs)** - remote MCP server that pulls up-to-date,
+version-specific library documentation into the prompt. Works without an
+API key (rate-limited); custom HTTP headers, needed for keyed endpoints,
+are not sent by the client yet.
 
 ## Cache
 
@@ -379,7 +446,7 @@ consensus/
     static/       SPA + vendored highlight.js (BSD-3)
   tui/            Textual terminal UI
   docs/           detailed documentation (teams, providers, RAG, UI)
-  tests/          offline unit tests (179+ tests)
+  tests/          offline unit tests (300+ tests)
 ```
 
 ## Documentation

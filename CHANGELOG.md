@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- README badges: added PostgreSQL (psycopg/pgvector are core dependencies).
 - README restructured: what/why up front (single-model vs panel comparison,
   use-it-if / not-for), provider-agnostic and fully-local story promoted
   (Providers section moved up, no-key quickstart), Context7 MCP example,
